@@ -8,20 +8,10 @@ from typing import List, Dict, Any
 from app.events import emit
 from app.llm.router import call_llm
 from app.workspace.manager import get_workspace_manager
+from app.graph.agent_docs import load_all_agent_docs
 
 def load_agent_docs() -> str:
-    docs = []
-    try:
-        # Resolve from backend/app/graph/nodes/orchestrator.py -> ../../../../../docs/agents
-        docs_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "docs" / "agents"
-        if docs_dir.exists():
-            for doc_name in ["SOUL.md", "HEAD.md", "PLANNING.md", "TOOLS.md", "WORKFLOW.md", "TASKS.md"]:
-                doc_path = docs_dir / doc_name
-                if doc_path.exists():
-                    docs.append(f"--- {doc_name} ---\n{doc_path.read_text(encoding='utf-8')}\n")
-    except Exception as e:
-        print(f"Failed to load agent docs: {e}")
-    return "\n".join(docs)
+    return load_all_agent_docs()
 
 def clean_json(text: str) -> str:
     text = text.strip()

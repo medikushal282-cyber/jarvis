@@ -274,17 +274,22 @@ def extract_thoughts(raw_text: str) -> Tuple[str, Optional[str]]:
         return cleaned_text, thought_text
     return raw_text.strip(), None
 
-def call_litellm(system: str, user: str, model: str, provider: str) -> str:
+def call_litellm(system: str, user: str, model: str, provider: str = "groq") -> str:
     import litellm
-    model_str = model
-    if provider and provider != "litellm" and "/" not in model_str:
-        if provider == "ollama":
-            model_str = f"ollama/{model_str}"
-        elif provider == "openai":
-            model_str = f"openai/{model_str}"
-        elif provider == "groq":
+    prov = (provider or "groq").lower()
+    model_str = model or "openai/gpt-oss-120b"
+
+    if prov == "groq":
+        if not model_str.startswith("groq/"):
             model_str = f"groq/{model_str}"
-        elif provider == "anthropic":
+    elif prov == "ollama":
+        if not model_str.startswith("ollama/"):
+            model_str = f"ollama/{model_str}"
+    elif prov == "openai":
+        if not model_str.startswith("openai/"):
+            model_str = f"openai/{model_str}"
+    elif prov == "anthropic":
+        if not model_str.startswith("anthropic/"):
             model_str = f"anthropic/{model_str}"
     
     response = litellm.completion(
@@ -299,7 +304,7 @@ def call_litellm(system: str, user: str, model: str, provider: str) -> str:
 def call_llm(
     system: str,
     user: str,
-    model: str = "groq/llama3-70b-8192",
+    model: str = "openai/gpt-oss-120b",
     provider: str = "groq"
 ) -> Tuple[str, Optional[str]]:
     """
@@ -311,13 +316,17 @@ def call_llm(
     try:
         raw_response = call_litellm(system, user, model, prov)
     except Exception as e:
-        # Graceful fallback to default Groq model if configured
+        # Graceful fallback to default active Groq model if configured
         if os.environ.get("GROQ_API_KEY"):
             try:
-                raw_response = call_litellm(system, user, "groq/llama3-70b-8192", "groq")
+                raw_response = call_litellm(system, user, "openai/gpt-oss-120b", "groq")
             except Exception:
-                raise e
+                try:
+                    raw_response = call_litellm(system, user, "qwen/qwen3.8-27b", "groq")
+                except Exception:
+                    raise e
         else:
             raise e
 
     return extract_thoughts(raw_response)
+

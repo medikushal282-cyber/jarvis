@@ -146,7 +146,12 @@ async def execute_run_task(
         runs_db[run_id]["type"] = "chat"
         state["mode"] = "chat"
 
-        system_prompt = "You are frAIday, an advanced autonomous AI software engineering assistant.\n"
+        from app.graph.agent_docs import load_all_agent_docs
+        agent_docs = load_all_agent_docs()
+
+        system_prompt = "You are JARVIS, an advanced autonomous AI computer agent and software engineering orchestrator.\n"
+        if agent_docs:
+            system_prompt += f"\n[Foundational Directives & Agent Identity (SOUL, HEAD, TOOLS, WORKFLOW)]:\n{agent_docs}\n"
         if session_context_summary:
             system_prompt += f"\n[Session Context Memory]:\n{session_context_summary}\n"
         if recent_context:
@@ -157,8 +162,8 @@ async def execute_run_task(
                 system_prompt += f"{r.upper()}: {c}\n"
 
         system_prompt += (
-            "\nRespond naturally, directly, and concisely as an AI assistant. "
-            "Maintain conversational continuity with the user's ongoing session context. "
+            "\nRespond naturally, directly, and concisely as JARVIS. "
+            "Maintain conversational continuity with the user's ongoing session context and past experiences. "
             "Do NOT output JSON plans, tool steps, or markdown fences when answering conversational queries."
         )
 
@@ -178,9 +183,9 @@ async def execute_run_task(
                 model=model,
                 provider=provider
             )
-        except Exception:
-            chat_reply = "Hello! I am frAIday, your autonomous software engineering assistant. I can inspect your workspace, write code (Python, HTML, CSS, JavaScript), execute scripts, and launch live browser previews. What would you like to build today?"
-            chat_thought = "User provided a conversational greeting. Providing clear, direct introduction without triggering the tool execution DAG."
+        except Exception as e:
+            chat_reply = f"Error processing request with {model} ({provider}): {sanitize_error_message(str(e))}"
+            chat_thought = f"LLM error: {str(e)}"
 
         if chat_thought:
             thought_payload = {
@@ -219,7 +224,8 @@ async def execute_run_task(
         await emit(run_id, "run_completed", "assistant", {
             "status": "completed",
             "type": "chat",
-            "reply": chat_reply
+            "reply": chat_reply,
+            "summary": chat_reply
         })
         return
 
@@ -302,7 +308,17 @@ async def execute_run_task(
             await emit(run_id, "run_failed", node="validator", data={"message": last_val.get("reason", "Validation failed")})
         else:
             runs_db[run_id]["status"] = "completed"
-            await emit(run_id, "run_completed", data={"final_status": "completed"})
+            summary_msg = f"Task completed successfully: {objective}"
+            if state.get("artifacts"):
+                art_paths = [a.get("path", "") for a in state["artifacts"] if a.get("path")]
+                if art_paths:
+                    summary_msg += f"\n\nArtifacts Generated:\n" + "\n".join(f"- `{p}`" for p in art_paths)
+            proc_obs = [o for o in state.get("observations", []) if o.get("stdout")]
+            if proc_obs:
+                latest_stdout = proc_obs[-1].get("stdout", "").strip()
+                if latest_stdout:
+                    summary_msg += f"\n\nOutput:\n```\n{latest_stdout}\n```"
+            await emit(run_id, "run_completed", data={"final_status": "completed", "summary": summary_msg})
 
         # Persist execution run summary into session conversation
         if workspace_id and conversation_id:

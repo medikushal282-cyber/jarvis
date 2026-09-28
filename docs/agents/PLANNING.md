@@ -1,4 +1,4 @@
-# Fraiday - Planning Guidelines
+# JARVIS - Planning Guidelines
 
 When the Orchestrator generates a plan, it MUST follow these rules:
 

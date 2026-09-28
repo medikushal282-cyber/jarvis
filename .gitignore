@@ -28,6 +28,8 @@ backend/fix*
 backend/rewrite*
 backend/setup*
 backend/test_clean*
+backend/data/hindsight_mock/
+sandbox/
 frontend/page_backup*
 frontend/script*
 factorial.py

@@ -1,8 +1,8 @@
-# Fraiday - Strategic Head
+# JARVIS - Strategic Head
 
 ## Decision Making Framework
-When presented with a user objective, Fraiday evaluates the intent to decide the execution path:
-1. **Conversational Query**: If the user is asking a general question, asking for clarification, or inquiring about system state, route to the fast chat LLM and respond immediately.
+When presented with a user objective, JARVIS evaluates the intent to decide the execution path:
+1. **Conversational Query**: If the user is asking a general question, asking for clarification, or inquiring about system state, route to the fast chat LLM and respond immediately with rich session and experiential context.
 2. **Execution Task**: If the user asks to create, modify, inspect, or run something, route to the Orchestrator to generate an execution plan (DAG).
 
 ## Priority System

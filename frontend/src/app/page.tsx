@@ -19,20 +19,38 @@ interface ToolActivity {
 const DragHandle = ({ onDrag, className = "" }: { onDrag: (delta: number) => void; className?: string }) => {
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const onMouseMove = (ev: MouseEvent) => onDrag(ev.clientX - startX);
-    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); };
+    let lastX = e.clientX;
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - lastX;
+      if (delta !== 0) {
+        lastX = ev.clientX;
+        onDrag(delta);
+      }
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
-  return <div className={`w-1 cursor-col-resize bg-transparent hover:bg-fra-yellow/50 active:bg-fra-yellow transition-colors flex-shrink-0 ${className}`} onMouseDown={handleMouseDown} />;
+  return (
+    <div 
+      className={`w-1 cursor-col-resize bg-neutral-800 hover:bg-fra-yellow active:bg-fra-yellow transition-colors flex-shrink-0 z-20 ${className}`} 
+      onMouseDown={handleMouseDown} 
+    />
+  );
 };
 
 export default function FraidayWorkspace() {
 
   const [view, setView] = useState("conversation");
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [workspace, setWorkspace] = useState("Fraiday");
+  const [workspace, setWorkspace] = useState("Jarvis");
   const [workspaceRoot, setWorkspaceRoot] = useState("C:\\Projects\\RAGTEC\\Fraiday");
   const [runtimeInfo, setRuntimeInfo] = useState<any>(null);
   
@@ -49,7 +67,6 @@ export default function FraidayWorkspace() {
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   
   const [commandModalOpen, setCommandModalOpen] = useState(false);
-  const [switches, setSwitches] = useState({ web: true, kb: true, tools: true });
   
   // Helper to ensure preview URLs are relative to workspace root
   const getRelativePreviewUrl = (targetPath: string) => {
@@ -366,7 +383,7 @@ export default function FraidayWorkspace() {
           } else if (type === 'context_loaded') {
             addActivity({
               type: 'CONTEXT',
-              title: `Workspace Context Initialized: ${eventData.workspace?.name || 'Fraiday'}`,
+              title: `Workspace Context Initialized: ${eventData.workspace?.name || 'Jarvis'}`,
               detail: `Root: ${eventData.workspace?.root_path || workspaceRoot} | History turns: ${eventData.conversation_turns || 0}`,
               status: 'completed'
             });
@@ -575,10 +592,6 @@ export default function FraidayWorkspace() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [inputVal, runStatus]);
 
-  const toggleSwitch = (key: 'web' | 'kb' | 'tools') => {
-    setSwitches(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   const createNewConversation = () => {
     setChatHistory([]);
     setContextSummary('');
@@ -603,7 +616,7 @@ export default function FraidayWorkspace() {
       <header className="h-14 border-b-2 border-fra-black bg-fra-cream flex items-center justify-between px-3 flex-shrink-0 z-30 select-none">
         <div className="flex items-center space-x-4">
           <div className="flex items-center cursor-pointer group" onClick={() => setView('conversation')}>
-            <span className="font-extrabold text-2xl tracking-tighter font-sans bg-black text-white px-2 py-0.5 mr-1">FRAIDAY_</span>
+            <span className="font-extrabold text-2xl tracking-tighter font-sans bg-black text-white px-2 py-0.5 mr-1">JARVIS_</span>
           </div>
           <div className="border-l-2 border-fra-black pl-3 text-[9px] leading-tight font-mono font-bold tracking-tight text-neutral-800 hidden md:block">
             WORKSPACE ROOT: <span className="text-black font-extrabold">{workspaceRoot}</span><br/>
@@ -807,18 +820,19 @@ export default function FraidayWorkspace() {
             </div>
           </div>
         </aside>
+        <DragHandle onDrag={(delta) => setLeftSidebarWidth(w => Math.max(180, Math.min(480, w + delta)))} className="border-r-2 border-fra-black" />
 
         {/* MainContentArea */}
-        <main className="flex-1 flex flex-col overflow-hidden bg-fra-cream">
+        <main className="flex-1 flex flex-col overflow-hidden bg-fra-cream min-w-0">
           {view === 'conversation' && (
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex overflow-hidden min-w-0">
               {/* Chat Stream */}
-              <section className={`flex flex-col border-r-2 border-fra-black overflow-hidden bg-fra-cream ${previewOpen ? 'w-1/2' : 'flex-1'}`} style={previewOpen ? { width: `${100 - splitPreviewWidth}%` } : {}}>
+              <section className="flex flex-col border-r-2 border-fra-black overflow-hidden bg-fra-cream flex-1 min-w-0">
                 
                 <div className="p-4 border-b-2 border-fra-black bg-fra-cream flex-shrink-0">
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center space-x-2 text-[11px] text-neutral-600 font-mono">
-                      <span className="font-bold text-neutral-800">Fraiday</span>
+                      <span className="font-bold text-neutral-800">Jarvis</span>
                       <span>&gt;</span>
                       <span className="text-black font-semibold">Active Run</span>
                     </div>
@@ -853,7 +867,7 @@ export default function FraidayWorkspace() {
                   {chatHistory.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} max-w-3xl ${msg.role === 'user' ? 'ml-auto' : ''}`}>
                       {msg.role !== 'user' && (
-                        <div className="w-7 h-7 rounded bg-black flex-shrink-0 mr-2 flex items-center justify-center text-white font-bold text-[10px]">F_</div>
+                        <div className="w-7 h-7 rounded bg-black flex-shrink-0 mr-2 flex items-center justify-center text-white font-bold text-[10px]">J_</div>
                       )}
                       <div className={`p-3 text-[12px] font-mono max-w-[80%] ${
                         msg.role === 'user'
@@ -869,7 +883,7 @@ export default function FraidayWorkspace() {
                   {/* Active running stream for conversational chat (ONLY while active to avoid duplicate answers) */}
                   {(runStatus === 'running' || runStatus === 'starting') && runType === 'chat' && (
                     <div className="flex items-start max-w-3xl animate-in fade-in duration-200">
-                      <div className="w-8 h-8 rounded bg-black flex-shrink-0 mr-3 flex items-center justify-center text-white font-bold text-sm">F_</div>
+                      <div className="w-8 h-8 rounded bg-black flex-shrink-0 mr-3 flex items-center justify-center text-white font-bold text-sm">J_</div>
                       <div className="flex-1 space-y-3">
                         {thoughts.length > 0 && (
                           <ThinkingView
@@ -884,7 +898,7 @@ export default function FraidayWorkspace() {
                           {chatMessage || (
                             <div className="flex items-center space-x-2 text-neutral-500 font-mono text-xs">
                               <span className="w-2 h-2 rounded-full bg-fra-yellow animate-ping" />
-                              <span>frAIday is thinking...</span>
+                              <span>JARVIS is thinking...</span>
                             </div>
                           )}
                         </div>
@@ -1176,22 +1190,25 @@ export default function FraidayWorkspace() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center space-x-2">
-                      {(['web', 'kb', 'tools'] as const).map(key => (
-                        <button key={key} className="border-2 border-fra-black bg-white px-2 py-1 font-bold flex items-center space-x-1.5 shadow-brutal-sm" onClick={() => toggleSwitch(key)}>
-                          <span>{key === 'web' ? '[WEB] Search' : key === 'kb' ? '[KB] Knowledge' : '[TOOL] Tools'}</span>
-                          <span className={`w-2.5 h-2.5 rounded-full border border-black ${switches[key] ? 'bg-fra-yellow' : 'bg-neutral-300'}`}></span>
-                        </button>
-                      ))}
+                    <div className="flex items-center space-x-2 text-[10px] font-mono text-neutral-600">
+                      <span className="flex items-center gap-1.5 bg-white border border-neutral-300 px-2 py-0.5 shadow-brutal-sm">
+                        <span className="w-2 h-2 rounded-full bg-fra-green"></span>
+                        <span className="font-bold text-black">Autonomous Tools Active</span>
+                      </span>
                     </div>
                   </div>
                 </div>
               </section>
-              {previewOpen && <DragHandle onDrag={(d) => setSplitPreviewWidth(p => Math.max(200, Math.min(1000, p - d)))} className="border-r-2 border-fra-black z-30" />}
+              {previewOpen && (
+                <DragHandle 
+                  onDrag={(delta) => setSplitPreviewWidth(w => Math.max(250, Math.min(900, w - delta)))} 
+                  className="border-r-2 border-fra-black" 
+                />
+              )}
 
               {/* Split-View Live Browser Preview */}
               {previewOpen && (
-                <section className="flex flex-col border-r-2 border-fra-black overflow-hidden bg-neutral-100" style={{ width: splitPreviewWidth }}>
+                <section className="flex flex-col border-r-2 border-fra-black overflow-hidden bg-neutral-100 flex-shrink-0" style={{ width: splitPreviewWidth }}>
                   <BrowserPreview
                     url={previewUrl}
                     isOpen={previewOpen}
@@ -1203,8 +1220,11 @@ export default function FraidayWorkspace() {
               )}
 
               {/* RightInspectorPanel */}
-              {!previewOpen && <DragHandle onDrag={(d) => setRightInspectorWidth(p => Math.max(200, Math.min(800, p - d)))} className="border-l-2 border-fra-black z-30" />}
-              <aside className="bg-fra-cream flex flex-col overflow-y-auto select-none font-mono flex-shrink-0" style={{ width: previewOpen ? rightInspectorWidth - 100 : rightInspectorWidth, borderLeft: previewOpen ? "2px solid #000" : "none" }}>
+              <DragHandle 
+                onDrag={(delta) => setRightInspectorWidth(w => Math.max(240, Math.min(700, w - delta)))} 
+                className="border-l-2 border-fra-black" 
+              />
+              <aside className="bg-fra-cream flex flex-col overflow-y-auto select-none font-mono flex-shrink-0" style={{ width: previewOpen ? Math.max(200, rightInspectorWidth - 80) : rightInspectorWidth }}>
                 <div className="grid grid-cols-4 border-b-2 border-fra-black text-[11px] font-bold text-center">
                   <button 
                     className={`py-2.5 border-r-2 border-fra-black font-extrabold transition-colors ${
@@ -1509,7 +1529,7 @@ export default function FraidayWorkspace() {
                           </button>
                         </div>
                         {artifacts.length === 0 ? (
-                          <div className="text-[10px] text-neutral-400 italic">No artifacts generated yet. Click "Add File" to attach workspace files.</div>
+                          <div className="text-[10px] text-neutral-400 italic">No artifacts generated yet. Click &quot;Add File&quot; to attach workspace files.</div>
                         ) : (
                           <div className="space-y-1.5 text-[10px]">
                             {artifacts.map((art, idx) => {
@@ -1653,7 +1673,7 @@ export default function FraidayWorkspace() {
 
       <footer className="h-6 border-t-2 border-fra-black bg-fra-cream px-3 flex items-center justify-between text-[10px] font-mono select-none flex-shrink-0 z-30">
         <div className="flex items-center space-x-3">
-          <span className="font-bold">FRAIDAY v0.3.0</span><span>|</span><span className="text-neutral-700">{workspace} ({workspaceRoot})</span><span>|</span><span className="text-fra-green font-bold">Runtime Healthy</span>
+          <span className="font-bold">JARVIS v1.0.0</span><span>|</span><span className="text-neutral-700">{workspace} ({workspaceRoot})</span><span>|</span><span className="text-fra-green font-bold">Runtime Healthy</span>
         </div>
         <div className="font-bold uppercase tracking-widest text-neutral-800">IDEAS TODAY. EXECUTION TOMORROW.</div>
       </footer>
@@ -1695,7 +1715,7 @@ export default function FraidayWorkspace() {
       <FilePickerModal
         isOpen={filePickerOpen}
         onClose={() => setFilePickerOpen(false)}
-        workspaceId={activeWorkspaceId}
+        workspaceId={activeWorkspaceId || 'default'}
         onSelect={handleAttachFiles}
       />
     </>

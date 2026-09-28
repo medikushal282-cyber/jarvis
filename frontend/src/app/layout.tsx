@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FRAIDAY_ | Autonomous Execution Workspace",
+  title: "JARVIS_ | Autonomous Execution Workspace",
 };
 
 export default function RootLayout({

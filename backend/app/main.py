@@ -13,7 +13,7 @@ from app.api.preview import router as preview_router
 from app.api.sandbox import router as sandbox_router
 from app.llm.router import get_models_catalog
 
-app = FastAPI(title="Fraiday Orchestration API", version="0.1.0")
+app = FastAPI(title="JARVIS Orchestration API", version="1.0.0")
 
 @app.middleware("http")
 async def workspace_middleware(request: Request, call_next):
@@ -51,20 +51,20 @@ def list_models():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "fraiday-orchestrator"}
+    return {"status": "healthy", "service": "jarvis-orchestrator"}
 
 @app.get("/health/groq")
 def groq_health():
     start_time = time.time()
     try:
         from app.llm.router import call_litellm
-        call_litellm("Reply only OK", "hi", "groq/llama3-8b-8192", "groq")
+        call_litellm("Reply only OK", "hi", "openai/gpt-oss-120b", "groq")
         latency_ms = int((time.time() - start_time) * 1000)
         return {
             "provider": "groq",
             "status": "connected",
             "latency_ms": latency_ms,
-            "model": "qwen/qwen3.8-27b",
+            "model": "openai/gpt-oss-120b",
             "error_type": None
         }
     except Exception as e:

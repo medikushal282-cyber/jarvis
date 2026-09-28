@@ -20,9 +20,9 @@ class CommandDeniedError(PermissionError):
     pass
 
 class WorkspaceManager:
-    def __init__(self, root_path: Optional[str] = None, workspace_id: str = "ws_default", name: str = "Fraiday"):
+    def __init__(self, root_path: Optional[str] = None, workspace_id: str = "ws_default", name: str = "JARVIS"):
         if not root_path:
-            root_path = os.environ.get("FRAIDAY_WORKSPACE_ROOT")
+            root_path = os.environ.get("JARVIS_WORKSPACE_ROOT") or os.environ.get("FRAIDAY_WORKSPACE_ROOT")
         if not root_path:
             # Fallback to repository root (parent directory of backend)
             app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

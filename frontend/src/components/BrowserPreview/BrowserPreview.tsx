@@ -14,7 +14,7 @@ export const BrowserPreview: React.FC<BrowserPreviewProps> = ({
   url,
   isOpen,
   onClose,
-  title = "frAIday Live Browser Preview",
+  title = "JARVIS Live Browser Preview",
   embedded = false,
 }) => {
   const [deviceMode, setDeviceMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');

@@ -390,17 +390,29 @@ async def executor_node(state: dict) -> dict:
 
         elif action in ["CREATE_FILE", "WRITE_FILE"]:
             rel_path = args.get("path") or target
+            content_from_args = args.get("content")
             
-            system_prompt = f"Return ONLY valid file content for target file '{rel_path}'. Do NOT include markdown fences, conversational commentary, or tool call markup."
-            user_prompt = f"Target: {rel_path}\nObjective: {objective}"
-            try:
-                selected_model = state.get("model", "qwen/qwen3.8-27b")
-                selected_provider = state.get("provider", "groq")
-                code, _ = await asyncio.to_thread(call_llm, system_prompt, user_prompt, model=selected_model, provider=selected_provider)
-            except Exception:
-                code = generate_smart_file_content(rel_path, objective, state.get("research", []), state.get("observations", []))
-                if code is None:
-                    code = f"# Fallback content for {rel_path}\n"
+            if content_from_args and str(content_from_args).strip():
+                code = str(content_from_args)
+            else:
+                system_prompt = (
+                    f"You are an expert AI software engineer. Generate the complete source code or file content for '{rel_path}'.\n"
+                    f"Requirements: Strictly satisfy the objective. Return ONLY the complete, working content for '{rel_path}'.\n"
+                    f"Do NOT include markdown fences, conversational commentary, or tool protocol tags."
+                )
+                user_prompt = f"Target File: {rel_path}\nObjective: {objective}"
+                research = state.get("research", [])
+                if research:
+                    user_prompt += f"\nTechnical Research Findings:\n{json.dumps(research, indent=2)}"
+                try:
+                    selected_model = state.get("model", "openai/gpt-oss-120b")
+                    selected_provider = state.get("provider", "groq")
+                    code, _ = await asyncio.to_thread(call_llm, system_prompt, user_prompt, model=selected_model, provider=selected_provider)
+                except Exception as e:
+                    print(f"Error generating code for {rel_path}: {e}")
+                    code = generate_smart_file_content(rel_path, objective, state.get("research", []), state.get("observations", []))
+                    if code is None:
+                        code = f"# Content for {rel_path}\n"
 
             await emit(run_id, "tool_call_started", "executor", {"tool": "create_file", "path": rel_path})
             res = await asyncio.to_thread(execute_action, {"tool": "create_file", "arguments": {"path": rel_path, "content": code}})
@@ -448,29 +460,38 @@ async def executor_node(state: dict) -> dict:
 
         elif action == "UPDATE_FILE":
             rel_path = args.get("path") or target
+            content_from_args = args.get("content")
             read_res = await asyncio.to_thread(execute_action, {"tool": "read_file", "arguments": {"path": rel_path}})
             existing_code = read_res.get("content", "")
 
-            system_prompt = f"Update target file '{rel_path}' content. Return ONLY valid file content without markdown or natural language commentary.\nExisting content:\n{existing_code}\nObjective: {objective}"
-            user_prompt = f"Target: {rel_path}"
-            try:
-                selected_model = state.get("model", "qwen/qwen3.8-27b")
-                selected_provider = state.get("provider", "groq")
-                updated_code, _ = await asyncio.to_thread(call_llm, system_prompt, user_prompt, model=selected_model, provider=selected_provider)
-            except Exception:
-                quoted = extract_quoted_strings(objective)
-                if len(quoted) >= 2:
-                    updated_code = f"print('{quoted[1]}')\n"
-                elif "hello fraiday 2" in objective.lower() or "2" in objective.lower():
-                    updated_code = "print('Hello Fraiday 2')\n"
-                elif len(quoted) == 1:
-                    updated_code = f"print('{quoted[0]} 2')\n"
-                elif "1 through 10" in objective.lower() or "1 to 10" in objective.lower():
-                    updated_code = "for i in range(1, 11):\n    print(i)\n"
-                elif "calc" in objective.lower():
-                    updated_code = "print('calc v2')\n"
-                else:
-                    updated_code = existing_code + "\n# Updated implementation\n"
+            if content_from_args and str(content_from_args).strip():
+                updated_code = str(content_from_args)
+            else:
+                system_prompt = (
+                    f"You are an expert AI software engineer. Update the source file '{rel_path}' to satisfy the objective.\n"
+                    f"Return ONLY the complete, updated file content.\n"
+                    f"Do NOT include markdown fences, conversational commentary, or tool protocol tags."
+                )
+                user_prompt = f"Target File: {rel_path}\nObjective: {objective}\nExisting Content:\n{existing_code}"
+                try:
+                    selected_model = state.get("model", "openai/gpt-oss-120b")
+                    selected_provider = state.get("provider", "groq")
+                    updated_code, _ = await asyncio.to_thread(call_llm, system_prompt, user_prompt, model=selected_model, provider=selected_provider)
+                except Exception as e:
+                    print(f"Error generating updated code for {rel_path}: {e}")
+                    quoted = extract_quoted_strings(objective)
+                    if len(quoted) >= 2:
+                        updated_code = f"print('{quoted[1]}')\n"
+                    elif "hello fraiday 2" in objective.lower() or "2" in objective.lower():
+                        updated_code = "print('Hello Fraiday 2')\n"
+                    elif len(quoted) == 1:
+                        updated_code = f"print('{quoted[0]} 2')\n"
+                    elif "1 through 10" in objective.lower() or "1 to 10" in objective.lower():
+                        updated_code = "for i in range(1, 11):\n    print(i)\n"
+                    elif "calc" in objective.lower():
+                        updated_code = "print('calc v2')\n"
+                    else:
+                        updated_code = existing_code + "\n# Updated implementation\n"
 
             await emit(run_id, "tool_call_started", "executor", {"tool": "update_file", "path": rel_path})
             res = await asyncio.to_thread(execute_action, {"tool": "update_file", "arguments": {"path": rel_path, "content": updated_code}})

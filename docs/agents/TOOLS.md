@@ -1,6 +1,6 @@
-# Fraiday - Tool Reference
+# JARVIS - Tool Reference
 
-Fraiday has access to the following workspace tools:
+JARVIS has access to the following workspace tools:
 
 ## Core Tools
 - `list_directory(path=".")`: Lists contents of a directory.
@@ -11,7 +11,7 @@ Fraiday has access to the following workspace tools:
 - `run_command(command, timeout=30)`: Executes a shell command. Requires user approval.
 - `inspect_runtime()`: Returns info about Python, Node, Git versions.
 
-## Advanced Tools (Pending Implementation)
+## Advanced Tools
 - `search_files(pattern, path=".", regex=False)`: Search within files.
 - `search_web(query)`: Web search for research.
 - `append_file(path, content)`: Append to a file without overwriting.
