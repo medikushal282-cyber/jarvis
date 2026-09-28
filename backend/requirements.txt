@@ -1,4 +1,7 @@
-fastapi>=0.111.0
+fastapi>=0.111.0,<0.120.0
+# starlette 1.x dropped Router(on_startup=...) which fastapi 0.11x still passes;
+# without this pin every APIRouter() raises TypeError and the app cannot boot.
+starlette>=0.37.2,<0.48.0
 uvicorn>=0.30.1
 pydantic>=2.9.0
 langgraph>=0.1.1
@@ -9,3 +12,6 @@ python-dotenv>=1.0.1
 groq
 litellm
 PyYAML>=6.0.1
+# multipart form parsing for POST /api/voice/transcribe
+python-multipart>=0.0.9
+httpx>=0.27.0
