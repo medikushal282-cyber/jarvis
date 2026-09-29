@@ -137,15 +137,18 @@ class WorkspaceStore:
             owner = meta.get("user_id", LOCAL_USER_ID)
             if user_id and owner not in (user_id, LOCAL_USER_ID):
                 continue
-            sessions_dir = entry / "sessions"
-            legacy_dir = entry / "conversations"
-            count = 0
-            for d in (sessions_dir, legacy_dir):
+            # A migrated conversation exists in both folders; count it once.
+            stems = set()
+            for d in (entry / "sessions", entry / "conversations"):
                 if d.is_dir():
-                    count += len([f for f in d.iterdir() if f.suffix == ".json"])
+                    stems.update(f.stem for f in d.iterdir() if f.suffix == ".json")
+            count = len(stems)
             out.append(
                 {
-                    "id": meta.get("id", entry.name),
+                    # The directory name is the id. workspace.json can be
+                    # stale (sandbox/kushal holds "kushal\\" from the old
+                    # unsanitised API), and ids are validated on every lookup.
+                    "id": entry.name,
                     "name": meta.get("name", entry.name),
                     "description": meta.get("description", ""),
                     "user_id": owner,
@@ -274,6 +277,7 @@ class SessionStore:
         status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         out: List[Session] = []
+        seen: set = set()
         root = self.workspaces.root()
         workspaces = (
             [self.workspaces.dir_for(workspace_id)] if workspace_id else
@@ -293,6 +297,11 @@ class SessionStore:
                     raw.setdefault("id", f.stem)
                     raw.setdefault("workspace_id", ws_dir.name)
                     session = Session.from_dict(raw)
+                    # sessions/ is read first, so a migrated legacy copy in
+                    # conversations/ is skipped rather than listed twice.
+                    if session.id in seen:
+                        continue
+                    seen.add(session.id)
                     if user_id and session.user_id not in (user_id, LOCAL_USER_ID):
                         continue
                     if status and session.status != status:

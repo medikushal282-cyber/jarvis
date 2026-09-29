@@ -9,12 +9,15 @@ router = APIRouter(prefix="/workers", tags=["Workers"])
 class WorkerCreateRequest(BaseModel):
     provider: str
     model: str
-    api_key: str
+    api_key: str = ""
+    credential_env: str = ""
     display_name: Optional[str] = None
     priority: Optional[int] = 1
+    owner: Optional[str] = ""
 
 class WorkerUpdateRequest(BaseModel):
     api_key: Optional[str] = None
+    credential_env: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
     display_name: Optional[str] = None
@@ -31,6 +34,7 @@ def list_workers():
 def create_worker(data: WorkerCreateRequest):
     new_w = add_worker(data.model_dump())
     new_w.pop("api_key", None)
+    new_w.pop("credential_env", None)
     return new_w
 
 @router.patch("/{worker_id}")
@@ -39,6 +43,7 @@ def edit_worker(worker_id: str, data: WorkerUpdateRequest):
     if not updated:
         raise HTTPException(status_code=404, detail="Worker not found")
     updated.pop("api_key", None)
+    updated.pop("credential_env", None)
     return updated
 
 @router.delete("/{worker_id}")
@@ -51,7 +56,8 @@ def remove_worker(worker_id: str):
 class WorkerTestRequest(BaseModel):
     provider: str
     model: str
-    api_key: str
+    api_key: str = ""
+    credential_env: str = ""
 
 @router.post("/test")
 def test_worker_connection(data: WorkerTestRequest):

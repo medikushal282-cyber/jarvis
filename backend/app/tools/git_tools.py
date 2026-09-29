@@ -6,8 +6,13 @@ from app.tools.base import Tool, ToolResult, ToolContext
 from app.workspace.manager import get_workspace_manager
 
 
-def run_git_cmd(args: List[str], cwd: Optional[str] = None) -> Dict[str, Any]:
-    ws = get_workspace_manager()
+def run_git_cmd(args: List[str], cwd: Optional[str] = None, context: Optional[ToolContext] = None) -> Dict[str, Any]:
+    if context and context.workspace_root and context.workspace_root not in (".", ""):
+        ws = get_workspace_manager(workspace_id=context.workspace_id, root_path=context.workspace_root)
+    elif context and context.workspace_id:
+        ws = get_workspace_manager(workspace_id=context.workspace_id)
+    else:
+        ws = get_workspace_manager()
     work_dir = cwd or ws.root_path
     cmd = ["git"] + args
     try:
@@ -41,6 +46,7 @@ def run_git_cmd(args: List[str], cwd: Optional[str] = None) -> Dict[str, Any]:
 class GitStatusTool(Tool):
     name = "git_status"
     description = "Shows the working tree status."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {}
@@ -48,7 +54,7 @@ class GitStatusTool(Tool):
     required_permissions = ["git.read"]
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
-        res = run_git_cmd(["status", "--porcelain"])
+        res = run_git_cmd(["status", "--porcelain"], context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"status": res.get("stdout")})
@@ -57,6 +63,7 @@ class GitStatusTool(Tool):
 class GitDiffTool(Tool):
     name = "git_diff"
     description = "Shows changes between commits, commit and working tree, etc."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -72,8 +79,9 @@ class GitDiffTool(Tool):
             args.append("--staged")
         if arguments.get("path"):
             args.append(arguments["path"])
-        res = run_git_cmd(args)
+        res = run_git_cmd(args, context=context)
         if not res.get("success"):
+
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"diff": res.get("stdout")})
 
@@ -81,6 +89,7 @@ class GitDiffTool(Tool):
 class GitLogTool(Tool):
     name = "git_log"
     description = "Shows commit logs."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -91,7 +100,7 @@ class GitLogTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         max_count = int(arguments.get("max_count", 10))
-        res = run_git_cmd(["log", f"-n{max_count}", "--oneline"])
+        res = run_git_cmd(["log", f"-n{max_count}", "--oneline"], context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"log": res.get("stdout")})
@@ -100,6 +109,7 @@ class GitLogTool(Tool):
 class GitAddTool(Tool):
     name = "git_add"
     description = "Adds file contents to the staging index."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -113,15 +123,17 @@ class GitAddTool(Tool):
         files = arguments.get("files", ["."])
         if isinstance(files, str):
             files = [files]
-        res = run_git_cmd(["add"] + files)
+        res = run_git_cmd(["add"] + files, context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"files": files, "staged": True})
 
 
+
 class GitCommitTool(Tool):
     name = "git_commit"
     description = "Records changes to the repository."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -133,7 +145,7 @@ class GitCommitTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         msg = arguments.get("message", "")
-        res = run_git_cmd(["commit", "-m", msg])
+        res = run_git_cmd(["commit", "-m", msg], context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"message": msg, "output": res.get("stdout")})
@@ -142,6 +154,7 @@ class GitCommitTool(Tool):
 class GitCheckoutTool(Tool):
     name = "git_checkout"
     description = "Switches branches or restores working tree files."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -153,7 +166,7 @@ class GitCheckoutTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         branch = arguments.get("branch", "")
-        res = run_git_cmd(["checkout", branch])
+        res = run_git_cmd(["checkout", branch], context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"branch": branch, "output": res.get("stdout") or res.get("stderr")})
@@ -162,6 +175,7 @@ class GitCheckoutTool(Tool):
 class GitCreateBranchTool(Tool):
     name = "git_create_branch"
     description = "Creates a new Git branch."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -176,7 +190,7 @@ class GitCreateBranchTool(Tool):
         branch = arguments.get("branch", "")
         checkout = arguments.get("checkout", True)
         args = ["checkout", "-b", branch] if checkout else ["branch", branch]
-        res = run_git_cmd(args)
+        res = run_git_cmd(args, context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"branch": branch, "created": True})
@@ -185,6 +199,7 @@ class GitCreateBranchTool(Tool):
 class GitPullTool(Tool):
     name = "git_pull"
     description = "Fetches and integrates with another repository or local branch."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -200,7 +215,7 @@ class GitPullTool(Tool):
         args = ["pull", remote]
         if branch:
             args.append(branch)
-        res = run_git_cmd(args)
+        res = run_git_cmd(args, context=context)
         if not res.get("success"):
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"output": res.get("stdout") or res.get("stderr")})
@@ -209,6 +224,7 @@ class GitPullTool(Tool):
 class GitPushTool(Tool):
     name = "git_push"
     description = "Updates remote refs along with associated objects."
+    risk = "high"
     parameters = {
         "type": "object",
         "properties": {
@@ -224,7 +240,8 @@ class GitPushTool(Tool):
         args = ["push", remote]
         if branch:
             args.append(branch)
-        res = run_git_cmd(args)
+        res = run_git_cmd(args, context=context)
         if not res.get("success"):
+
             return ToolResult(success=False, tool=self.name, error={"code": "GIT_ERROR", "message": res.get("stderr") or res.get("error")})
         return ToolResult(success=True, tool=self.name, result={"output": res.get("stdout") or res.get("stderr")})

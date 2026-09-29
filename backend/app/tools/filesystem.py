@@ -9,9 +9,17 @@ from app.tools.base import Tool, ToolResult, ToolContext
 from app.workspace.manager import get_workspace_manager, PathSecurityError
 
 
+def _get_workspace(context: Optional[ToolContext] = None):
+    if context and context.workspace_root and context.workspace_root not in (".", ""):
+        return get_workspace_manager(workspace_id=context.workspace_id, root_path=context.workspace_root)
+    if context and context.workspace_id:
+        return get_workspace_manager(workspace_id=context.workspace_id)
+    return get_workspace_manager()
+
 class ListDirectoryTool(Tool):
     name = "list_directory"
     description = "Lists files and directories within a workspace path."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -22,7 +30,7 @@ class ListDirectoryTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", ".")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             res = ws.list_directory(path)
             if not res.get("success"):
@@ -56,6 +64,7 @@ class ListDirectoryTool(Tool):
 class ReadFileTool(Tool):
     name = "read_file"
     description = "Reads contents of a file inside the workspace."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -67,7 +76,7 @@ class ReadFileTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             res = ws.read_file(path)
             if not res.get("success"):
@@ -101,6 +110,7 @@ class ReadFileTool(Tool):
 class WriteFileTool(Tool):
     name = "write_file"
     description = "Writes or overwrites content to a file in the workspace."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -114,7 +124,7 @@ class WriteFileTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
         content = arguments.get("content", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             res = ws.write_file(path, content)
             if not res.get("success"):
@@ -176,16 +186,19 @@ class WriteFileTool(Tool):
 class CreateFileTool(WriteFileTool):
     name = "create_file"
     description = "Creates a new file in the workspace with given content."
+    risk = "medium"
 
 
 class UpdateFileTool(WriteFileTool):
     name = "update_file"
     description = "Updates an existing file in the workspace with given content."
+    risk = "medium"
 
 
 class DeleteFileTool(Tool):
     name = "delete_file"
     description = "Deletes a file inside the workspace."
+    risk = "high"
     parameters = {
         "type": "object",
         "properties": {
@@ -197,7 +210,7 @@ class DeleteFileTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             res = ws.delete_file(path)
             if not res.get("success"):
@@ -228,6 +241,7 @@ class DeleteFileTool(Tool):
 class CreateDirectoryTool(Tool):
     name = "create_directory"
     description = "Creates a directory in the workspace."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -239,7 +253,7 @@ class CreateDirectoryTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             res = ws.create_directory(path)
             if not res.get("success"):
@@ -264,6 +278,7 @@ class CreateDirectoryTool(Tool):
 class MoveFileTool(Tool):
     name = "move"
     description = "Moves or renames a file or directory in the workspace."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -277,7 +292,7 @@ class MoveFileTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         old_path = arguments.get("old_path", "")
         new_path = arguments.get("new_path", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             old_full = ws.resolve_path(old_path)
             new_full = ws.resolve_path(new_path)
@@ -311,11 +326,13 @@ class MoveFileTool(Tool):
 class RenameFileTool(MoveFileTool):
     name = "rename_file"
     description = "Renames a file in the workspace."
+    risk = "medium"
 
 
 class CopyFileTool(Tool):
     name = "copy"
     description = "Copies a file or directory within the workspace."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -329,7 +346,7 @@ class CopyFileTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         src = arguments.get("src", "")
         dest = arguments.get("dest", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             src_full = ws.resolve_path(src)
             dest_full = ws.resolve_path(dest)
@@ -370,6 +387,7 @@ class CopyFileLegacyTool(CopyFileTool):
 class AppendFileTool(Tool):
     name = "append_file"
     description = "Appends content to an existing file in the workspace."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -383,7 +401,7 @@ class AppendFileTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
         content = arguments.get("content", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             full_path = ws.resolve_path(path)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -411,6 +429,7 @@ class AppendFileTool(Tool):
 class PatchFileTool(Tool):
     name = "patch_file"
     description = "Finds and replaces text within a file in the workspace."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -428,7 +447,7 @@ class PatchFileTool(Tool):
         find_str = arguments.get("find", "")
         replace_str = arguments.get("replace", "")
         count = arguments.get("count", 1)
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             full_path = ws.resolve_path(path)
             if not os.path.exists(full_path):
@@ -470,6 +489,7 @@ class PatchFileTool(Tool):
 class GetFileInfoTool(Tool):
     name = "get_file_info"
     description = "Retrieves file metadata including size, modification time, and type."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -481,7 +501,7 @@ class GetFileInfoTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             full = ws.resolve_path(path)
             if not os.path.exists(full):
@@ -513,6 +533,7 @@ class GetFileInfoTool(Tool):
 class ListDirectoryTreeTool(Tool):
     name = "list_directory_tree"
     description = "Recursively lists files and directories in workspace up to max_depth."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -525,7 +546,7 @@ class ListDirectoryTreeTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", ".")
         max_depth = arguments.get("max_depth", 3)
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             start_full = ws.resolve_path(path)
             if not os.path.exists(start_full):
@@ -562,6 +583,7 @@ class ListDirectoryTreeTool(Tool):
 class DiffFilesTool(Tool):
     name = "diff_files"
     description = "Generates a unified diff between two files."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -575,7 +597,7 @@ class DiffFilesTool(Tool):
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path_a = arguments.get("path_a", "")
         path_b = arguments.get("path_b", "")
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             fa = ws.resolve_path(path_a)
             fb = ws.resolve_path(path_b)
@@ -597,6 +619,7 @@ class DiffFilesTool(Tool):
 class SearchFilesTool(Tool):
     name = "search_files"
     description = "Searches for text or regex patterns in workspace files."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -612,7 +635,7 @@ class SearchFilesTool(Tool):
         pattern = arguments.get("pattern", "")
         path = arguments.get("path", ".")
         regex = arguments.get("regex", False)
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         try:
             full_path = ws.resolve_path(path)
             if not os.path.isdir(full_path):

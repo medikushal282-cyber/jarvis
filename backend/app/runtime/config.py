@@ -92,16 +92,19 @@ TTS_ENABLED = _flag("JARVIS_TTS_ENABLED", True)
 #: "browser" keeps synthesis client-side (zero cost, zero latency);
 #: "groq" routes through the hosted TTS backend.
 TTS_BACKEND = os.environ.get("JARVIS_TTS_BACKEND", "browser").strip().lower()
+# Model ids checked against Groq's live model list on 2026-09-29.
 STT_MODEL = os.environ.get("JARVIS_STT_MODEL", "whisper-large-v3-turbo")
 STT_FALLBACK_MODELS = [
     m.strip()
-    for m in os.environ.get(
-        "JARVIS_STT_FALLBACK_MODELS", "whisper-large-v3,distil-whisper-large-v3-en"
-    ).split(",")
+    for m in os.environ.get("JARVIS_STT_FALLBACK_MODELS", "whisper-large-v3").split(",")
     if m.strip()
 ]
-TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "playai-tts")
-TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "Fritz-PlayAI")
+# Server-side TTS (JARVIS_TTS_BACKEND=groq). Orpheus needs the Groq org admin
+# to accept its terms once in the Groq console before it will answer.
+# Documented English voices: troy, hannah, austin. Output is WAV.
+TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "canopylabs/orpheus-v1-english")
+TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "troy")
+TTS_FORMAT = os.environ.get("JARVIS_TTS_FORMAT", "wav")
 MAX_UTTERANCE_S = _int("JARVIS_MAX_UTTERANCE_S", 60)
 MAX_AUDIO_BYTES = _int("JARVIS_MAX_AUDIO_BYTES", 25 * 1024 * 1024)
 SPEAKABLE_MAX_WORDS = _int("JARVIS_SPEAKABLE_MAX_WORDS", 40)

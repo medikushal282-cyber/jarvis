@@ -13,12 +13,19 @@ class MemoryExtractor:
         """
         if not text:
             return text
+            
         # Redact generic Bearer tokens
         text = re.sub(r'(?i)bearer\s+[a-zA-Z0-9_\-\.]{20,}', 'Bearer [REDACTED]', text)
+        
         # Redact generic potential API keys (heuristic)
         text = re.sub(r'(?i)(api[_-]?key|secret|password|token)["\s:=]+[a-zA-Z0-9_\-\.]{15,}', r'\1=[REDACTED]', text)
+        
+        # Redact OpenAI-style naked sk- and sk-proj- keys
+        text = re.sub(r'\bsk-(?:proj-)?[a-zA-Z0-9_\-\.]{20,}\b', '[REDACTED]', text)
+        
         # Redact very long base64-like strings (over 200 chars)
         text = re.sub(r'[a-zA-Z0-9+/#]{200,}={0,2}', '[LARGE_BLOB_REDACTED]', text)
+        
         return text
 
     @staticmethod

@@ -125,6 +125,11 @@ def get_agent_runner() -> AgentRunner:
     if impl == "null":
         return NullAgentRunner()
 
+    if impl == "scripted":
+        from app.runtime.adapters.scripted import ScriptedRunner
+
+        return ScriptedRunner()
+
     if impl == "core":
         try:
             from app.agent import JarvisBrain  # type: ignore[attr-defined]

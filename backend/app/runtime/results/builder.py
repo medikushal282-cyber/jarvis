@@ -11,11 +11,13 @@ See docs/runtime/RESULTS.md.
 from __future__ import annotations
 
 import posixpath
+import re
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 from app.runtime.events import catalog
-from app.runtime.ids import new_artifact_id
+from app.runtime.ids import stable_artifact_id
 
 #: Action kind -> (singular, plural) label templates.
 ACTION_LABELS: Dict[str, tuple] = {
@@ -50,6 +52,26 @@ MIME_BY_SUFFIX = {
 }
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+
+INTERACTION_RE = re.compile(r"click|type|scroll|screenshot|press|hover|fill", re.IGNORECASE)
+_OWN_PREVIEW_RE = re.compile(r"(^|//[^/]+)/api/(runs/[^/]+/artifacts|preview)/")
+
+
+def _is_own_preview(url: str) -> bool:
+    """A URL served by this backend's artifact or preview endpoints."""
+    if _OWN_PREVIEW_RE.search(url):
+        return True
+    # A bare workspace path ("shop/index.html") from the current brain.
+    return "://" not in url and not url.startswith("/")
+
+
+def _url_label(url: str) -> str:
+    """Show an outside page by its host, never as a raw URL."""
+    try:
+        host = urlparse(url).hostname
+    except ValueError:
+        host = None
+    return host or url
 
 
 def _norm(path: str) -> str:
@@ -216,14 +238,24 @@ class ResultBuilder:
             )
 
     def _on_browser_action(self, data: dict, ts: Optional[str]) -> None:
-        url = data.get("url")
-        if data.get("action") in (None, "open", "navigate") and url:
-            if url not in self._urls:
-                self._urls.append(url)
+        # Interactions inside a page are not "opened a page". The current brain
+        # puts its tool name in `action` (e.g. "open_browser"), so anything
+        # that is not an interaction counts as opening.
+        action = str(data.get("action") or "")
+        if INTERACTION_RE.search(action):
+            return
+        url = str(data.get("url") or "").strip()
+        if not url:
+            return
+        if url not in self._urls:
+            self._urls.append(url)
+            # A preview of one of JARVIS's own files is that file, which is
+            # already an artifact; only outside pages get a card of their own.
+            if not _is_own_preview(url):
                 self._add_artifact(
-                    url, "created", 0, ts, kind="url", name=url, url=url
+                    url, "created", 0, ts, kind="url", name=_url_label(url), url=url
                 )
-            self._bump("browser")
+        self._bump("browser")
 
     def _on_tool_completed(self, data: dict, ts: Optional[str]) -> None:
         self._bump("tool")
@@ -288,7 +320,65 @@ class ResultBuilder:
             if existing["action"] == "deleted":
                 existing["action"] = action
             return
+        # A tool may announce a file before its file event arrives: join them.
+        announced = self._announced_without_path(posixpath.basename(path))
+        if announced is not None:
+            announced["path"] = path
+            if size:
+                announced["bytes"] = size
+            self._artifacts[path] = announced
+            return
         self._add_artifact(path, action, size, ts)
+
+    def _announced_without_path(self, name: str) -> Optional[Dict[str, Any]]:
+        for entry in self._artifacts.values():
+            if entry.get("announced") and not entry.get("path") and entry.get("name") == name:
+                return entry
+        return None
+
+    def _on_artifact_created(self, data: dict, ts: Optional[str]) -> None:
+        """A tool registered a file it produced (INTERFACES.md 3.6).
+
+        One file, one card: if the same file already arrived through a file
+        event, the announcement is merged into it (its id and URL win).
+        """
+        aid = data.get("artifact_id")
+        if not aid:
+            return
+        name = str(data.get("filename") or aid)
+        url = data.get("secure_url") or data.get("url")
+        mime = data.get("mime_type")
+        size = int(data.get("size") or 0)
+        announced = {
+            "announced": True,
+            "preview_url": url,
+            "download_url": data.get("download_url"),
+        }
+
+        for entry in self._artifacts.values():
+            if entry["id"] == aid:
+                entry.update({k: v for k, v in announced.items() if v is not None})
+                return
+
+        for entry in self._artifacts.values():
+            if entry.get("type") in ("file", "image") and not entry.get("announced") and entry.get("name") == name:
+                entry.update(id=aid, **{k: v for k, v in announced.items() if v is not None})
+                entry["mime"] = mime or entry.get("mime")
+                entry["bytes"] = size or entry.get("bytes", 0)
+                return
+
+        key = f"announced:{aid}"
+        self._artifacts[key] = {
+            "id": aid,
+            "type": "image" if (mime or "").startswith("image/") else "file",
+            "name": name,
+            "action": "created",
+            "bytes": size,
+            "mime": mime,
+            "created_at": ts,
+            **announced,
+        }
+        self._artifact_order.append(key)
 
     def _add_artifact(
         self,
@@ -308,7 +398,7 @@ class ResultBuilder:
         if kind == "file" and mime and any(key.lower().endswith(s) for s in IMAGE_SUFFIXES):
             kind = "image"
         entry = {
-            "id": new_artifact_id(),
+            "id": stable_artifact_id(self.run_id, key),
             "type": kind,
             "name": display,
             "action": action,
@@ -403,6 +493,7 @@ class ResultBuilder:
         catalog.LEGACY_BROWSER_OPENED: _on_browser_action,
         catalog.TOOL_COMPLETED: _on_tool_completed,
         catalog.TOOL_FAILED: _on_tool_failed,
+        catalog.ARTIFACT_CREATED: _on_artifact_created,
         catalog.MEMORY_RECALLED: _on_memory_recalled,
         catalog.MEMORY_APPLIED: _on_memory_applied,
         catalog.MEMORY_RECORDED: _on_memory_recorded,

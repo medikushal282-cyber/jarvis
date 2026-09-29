@@ -1,3 +1,14 @@
+"""
+app/tools/browser_tools.py — Browser capability tools
+
+Security:
+  - open_browser: local preview only (connects to preview server)
+  - browser_screenshot / browser_navigate: SSRF-protected via shared validator
+  - No arbitrary private URL access
+
+Owner: Lohith (Capability / Tool Layer)
+"""
+
 import os
 import time
 import urllib.request
@@ -5,55 +16,116 @@ import urllib.parse
 from typing import Dict, Any, Optional
 
 from app.tools.base import Tool, ToolResult, ToolContext
+from app.tools.http_tools import validate_url_for_ssrf
+
+
+# ── Browser URL Security ──────────────────────────────────────────────────────
+
+# The JARVIS local preview server endpoint
+_PREVIEW_HOST = "http://localhost:8006"
+_PREVIEW_HOST_ALT = "http://127.0.0.1:8006"
+
+def _is_authorized_preview_url(url: str) -> bool:
+    """Returns True if the URL is the controlled local preview server."""
+    return url.startswith(_PREVIEW_HOST) or url.startswith(_PREVIEW_HOST_ALT)
+
+
+def validate_browser_url(url: str, allow_local_preview: bool = False) -> tuple[bool, Optional[str]]:
+    """
+    Validate a URL for browser navigation.
+
+    Local preview URLs (localhost:8006) are permitted only when
+    allow_local_preview=True. All other private/internal URLs are blocked.
+
+    Returns: (is_valid: bool, error_message: Optional[str])
+    """
+    if not url:
+        return False, "URL is required"
+    if not url.startswith(("http://", "https://")):
+        return False, "Only http:// and https:// URLs are supported"
+
+    # Allow authorized local preview
+    if allow_local_preview and _is_authorized_preview_url(url):
+        return True, None
+
+    # For all other URLs, apply full SSRF protection
+    return validate_url_for_ssrf(url, allow_private=False)
+
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
 
 
 class BrowserOpenTool(Tool):
     name = "open_browser"
-    description = "Opens a workspace file or URL for live browser preview."
+    description = "Opens a workspace file for live browser preview via the local preview server."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Relative file path or preview URL (e.g. 'index.html')"}
+            "path": {"type": "string", "description": "Relative workspace file path (e.g. 'index.html')"}
         }
     }
     required_permissions = ["browser.execute"]
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         path = arguments.get("path", "index.html")
+        # Sanitize path: remove leading / or ..
+        clean_path = path.lstrip("/").lstrip("\\")
+        if ".." in clean_path:
+            return ToolResult(
+                success=False,
+                tool=self.name,
+                error={"code": "PATH_SECURITY_ERROR", "message": "Path traversal not allowed in preview path"}
+            )
+        url = f"{_PREVIEW_HOST}/api/preview/{urllib.parse.quote(clean_path)}"
         try:
-            url = f"http://localhost:8006/api/preview/{urllib.parse.quote(path)}"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(url, headers={"User-Agent": "JARVIS-Preview/1.0"})
             with urllib.request.urlopen(req, timeout=10) as response:
-                html = response.read().decode('utf-8', errors='replace')
+                html = response.read().decode("utf-8", errors="replace")
+                status_code = response.status
+            if status_code != 200:
+                return ToolResult(
+                    success=False,
+                    tool=self.name,
+                    error={
+                        "code": "PREVIEW_ERROR",
+                        "message": f"Preview server returned HTTP {status_code}"
+                    }
+                )
             return ToolResult(
                 success=True,
                 tool=self.name,
-                result={"path": path, "url": url, "html_snippet": html[:2500]}
+                result={"path": clean_path, "url": url, "html_snippet": html[:2500]}
             )
         except Exception as e:
             return ToolResult(
-                success=True,
+                success=False,
                 tool=self.name,
-                result={"path": path, "url": f"http://localhost:8006/api/preview/{urllib.parse.quote(path)}", "note": str(e)}
+                error={
+                    "code": "PREVIEW_UNAVAILABLE",
+                    "message": f"Could not connect to local preview server: {e}. "
+                               f"Ensure the preview server is running at {_PREVIEW_HOST}"
+                }
             )
 
 
-import os
+import asyncio
 from app.artifacts import get_artifact_manager, get_default_artifacts_dir
 from app.events import emit
-import asyncio
+
 
 class BrowserScreenshotTool(Tool):
     name = "browser_screenshot"
     description = (
-        "Takes a screenshot of a web page using Playwright Chromium and registers it as a user-facing visual artifact. "
-        "Returns secure artifact metadata and URL for the clickable preview."
+        "Takes a screenshot of a web page using Playwright Chromium and registers it as an artifact. "
+        "Only permits external URLs — private/internal network addresses are blocked."
     )
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "Target web page URL to screenshot"},
-            "output_path": {"type": "string", "description": "Optional custom filename or relative path (e.g. 'mr_beast_google_search.png')"}
+            "url": {"type": "string", "description": "Target web page URL to screenshot (external URLs only)"},
+            "output_path": {"type": "string", "description": "Optional custom filename (e.g. 'result.png')"}
         },
         "required": ["url"]
     }
@@ -65,21 +137,28 @@ class BrowserScreenshotTool(Tool):
 
         if not url:
             return ToolResult(
-                success=False,
-                tool=self.name,
+                success=False, tool=self.name,
                 error={"code": "MISSING_URL", "message": "Argument 'url' is required."}
             )
 
-        # Ensure target directory is inside artifacts folder
+        # SSRF protection: allow local preview server, block everything else private
+        is_valid, err_msg = validate_browser_url(url, allow_local_preview=True)
+        if not is_valid:
+            return ToolResult(
+                success=False, tool=self.name,
+                status="security_blocked",
+                error={"code": "SSRF_BLOCKED", "message": f"URL blocked by browser security policy: {err_msg}"}
+            )
+
+        # Ensure output goes to artifacts directory
         artifacts_dir = get_default_artifacts_dir()
         if not raw_output_path:
             filename = f"screenshot_{int(time.time())}.png"
-            target_path = os.path.join(artifacts_dir, filename)
         else:
             filename = os.path.basename(raw_output_path)
-            if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            if not filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 filename = f"{filename}.png"
-            target_path = os.path.join(artifacts_dir, filename)
+        target_path = os.path.join(artifacts_dir, filename)
 
         try:
             from playwright.sync_api import sync_playwright
@@ -90,18 +169,12 @@ class BrowserScreenshotTool(Tool):
                 page.screenshot(path=target_path, full_page=False)
                 browser.close()
 
-            # 1. VERIFY ARTIFACT EXISTS AND IS NON-ZERO
             if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
                 return ToolResult(
-                    success=False,
-                    tool=self.name,
-                    error={
-                        "code": "ARTIFACT_CREATION_FAILED",
-                        "message": f"Browser screenshot could not be captured or resulted in an empty file."
-                    }
+                    success=False, tool=self.name,
+                    error={"code": "ARTIFACT_CREATION_FAILED", "message": "Screenshot resulted in empty file."}
                 )
 
-            # 2. REGISTER WITH ARTIFACT MANAGER
             session_id = context.session_id if context else None
             manager = get_artifact_manager()
             artifact = manager.register_artifact(
@@ -112,7 +185,6 @@ class BrowserScreenshotTool(Tool):
                 metadata={"target_url": url}
             )
 
-            # 3. EMIT ARTIFACT CREATED EVENT TO FRONTEND STREAM
             if session_id:
                 try:
                     loop = asyncio.get_event_loop()
@@ -126,36 +198,33 @@ class BrowserScreenshotTool(Tool):
                 tool=self.name,
                 data=artifact.to_dict(),
                 result=artifact.to_dict(),
+                artifacts=[artifact.to_dict()],
                 metadata={"artifact_verified": True}
             )
 
         except ImportError:
             return ToolResult(
-                success=False,
-                tool=self.name,
-                error={
-                    "code": "DEPENDENCY_MISSING",
-                    "message": "Playwright is not installed. Install with 'pip install playwright && playwright install chromium'."
-                }
+                success=False, tool=self.name,
+                error={"code": "DEPENDENCY_MISSING", "message": "Playwright not installed. Run: pip install playwright && playwright install chromium"}
             )
         except Exception as e:
             return ToolResult(
-                success=False,
-                tool=self.name,
-                error={
-                    "code": "BROWSER_EXECUTION_ERROR",
-                    "message": f"Browser screenshot failed: {str(e)}."
-                }
+                success=False, tool=self.name,
+                error={"code": "BROWSER_EXECUTION_ERROR", "message": f"Browser screenshot failed: {e}"}
             )
 
 
 class BrowserNavigateTool(Tool):
     name = "browser_navigate"
-    description = "Navigates a browser session to a URL and returns text content."
+    description = (
+        "Navigates a browser session to a URL and returns page text. "
+        "Private/internal network addresses are blocked for security."
+    )
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "Target URL"}
+            "url": {"type": "string", "description": "Target URL (external only)"}
         },
         "required": ["url"]
     }
@@ -163,6 +232,16 @@ class BrowserNavigateTool(Tool):
 
     def execute(self, arguments: Dict[str, Any], context: Optional[ToolContext] = None) -> ToolResult:
         url = arguments.get("url", "")
+
+        # SSRF protection
+        is_valid, err_msg = validate_browser_url(url, allow_local_preview=True)
+        if not is_valid:
+            return ToolResult(
+                success=False, tool=self.name,
+                status="security_blocked",
+                error={"code": "SSRF_BLOCKED", "message": f"URL blocked by browser security policy: {err_msg}"}
+            )
+
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
@@ -179,19 +258,11 @@ class BrowserNavigateTool(Tool):
             )
         except ImportError:
             return ToolResult(
-                success=False,
-                tool=self.name,
-                error={
-                    "code": "DEPENDENCY_MISSING",
-                    "message": "Playwright is not installed. Run 'pip install playwright && playwright install chromium'."
-                }
+                success=False, tool=self.name,
+                error={"code": "DEPENDENCY_MISSING", "message": "Playwright not installed."}
             )
         except Exception as e:
             return ToolResult(
-                success=False,
-                tool=self.name,
-                error={
-                    "code": "BROWSER_EXECUTION_ERROR",
-                    "message": f"Browser navigation failed: {e}"
-                }
+                success=False, tool=self.name,
+                error={"code": "BROWSER_EXECUTION_ERROR", "message": f"Browser navigation failed: {e}"}
             )

@@ -1,7 +1,7 @@
 @echo off
-title Fraiday - Git Auto-Sync
+title Jarvis - Git Auto-Sync
 echo ========================================================
-echo          Syncing Fraiday Repository with Git
+echo          Syncing Jarvis Repository with Git
 echo ========================================================
 echo.
 
@@ -17,14 +17,14 @@ git add .
 echo.
 echo [3/4] Committing changes...
 if "%~1"=="" (
-    git commit -m "chore: automated sync for Fraiday %date% %time%"
+    git commit -m "chore: automated sync for Jarvis %date% %time%"
 ) else (
     git commit -m "%~1"
 )
 
 echo.
 echo [4/4] Pushing to remote repository...
-git push -u origin main
+git push -u origin HEAD
 
 echo.
 echo ========================================================

@@ -32,6 +32,7 @@ def get_public_workers() -> List[Dict[str, Any]]:
             w["api_key_hint"] = ""
         # Remove raw key before returning to UI
         w.pop("api_key", None)
+        w.pop("credential_env", None)
         
         # Update dynamic status based on cooldown
         cooldown = w.get("cooldown_until", 0)
@@ -56,10 +57,12 @@ def add_worker(data: Dict[str, Any]) -> Dict[str, Any]:
     
     new_worker = {
         "worker_id": worker_id,
+        "owner": data.get("owner", ""),
         "provider": data.get("provider", "groq"),
         "model": data.get("model", "llama-3.1-8b-instant"),
         "display_name": data.get("display_name", f"{data.get('provider')} - {data.get('model')}"),
         "api_key": data.get("api_key", ""),
+        "credential_env": data.get("credential_env", ""),
         "enabled": data.get("enabled", True),
         "priority": data.get("priority", 1),
         "status": "HEALTHY",
@@ -75,6 +78,10 @@ def update_worker(worker_id: str, data: Dict[str, Any]) -> Optional[Dict[str, An
     workers = load_workers()
     for w in workers:
         if w["worker_id"] == worker_id:
+            if "owner" in data:
+                w["owner"] = data["owner"].strip()
+            if "credential_env" in data:
+                w["credential_env"] = data["credential_env"].strip()
             if "api_key" in data and data["api_key"].strip():
                 w["api_key"] = data["api_key"].strip()
             if "enabled" in data:

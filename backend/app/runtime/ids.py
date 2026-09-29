@@ -7,6 +7,7 @@ every path built from request input goes through ``resolve_within``. See
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -49,6 +50,17 @@ def new_turn_id() -> str:
 
 def new_artifact_id() -> str:
     return f"{ARTIFACT_PREFIX}_{_hex(8)}"
+
+
+def stable_artifact_id(run_id: str, key: str) -> str:
+    """Same run + same normalised path -> same id, every time.
+
+    A random id per result build meant a URL handed out mid-run stopped
+    resolving on the next request. Deterministic ids also let a producer put
+    a working link in its ``artifact_created`` event before the result exists.
+    """
+    digest = hashlib.sha1(f"{run_id}\x00{key}".encode("utf-8")).hexdigest()
+    return f"{ARTIFACT_PREFIX}_{digest[:12]}"
 
 
 def new_call_id() -> str:
@@ -155,6 +167,7 @@ __all__ = [
     "new_run_id",
     "new_turn_id",
     "new_artifact_id",
+    "stable_artifact_id",
     "new_call_id",
     "new_request_id",
     "utc_now",

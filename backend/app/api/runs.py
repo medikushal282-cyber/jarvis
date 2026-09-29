@@ -40,6 +40,7 @@ class RunRequestBody(BaseModel):
     conversation_id: Optional[str] = None  # legacy name for session_id
     session_id: Optional[str] = None
     input_mode: str = "text"
+    execution_mode: str = "normal"
     attachments: Optional[List[AttachmentItem]] = None
 
 
@@ -66,6 +67,7 @@ async def create_run(body: RunRequestBody, request: Request):
             model=body.model,
             provider=body.provider,
             input_mode=body.input_mode,
+            execution_mode=body.execution_mode,
             attachments=[a.model_dump() for a in (body.attachments or [])],
         )
     except ValueError as exc:
@@ -92,7 +94,7 @@ async def approve_run(run_id: str, body: ApprovalRequest):
 
     emit = get_emitter(run_id, "runtime")
     emit(
-        "approval_granted" if decision == "approve" else "approval_rejected",
+        "permission_granted" if decision == "approve" else "permission_denied",
         {"request_id": body.request_id or (run.approval_request or {}).get("request_id", "")},
     )
 

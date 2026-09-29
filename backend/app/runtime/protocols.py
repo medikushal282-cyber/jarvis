@@ -15,6 +15,14 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 # --- Runtime -> Brain -------------------------------------------------------
 
+#: How much the user pre-authorised. "turbo" lets Lohit's permission engine
+#: skip the interactive prompt for actions the user's configured permissions
+#: already cover. It is a policy input to that engine, never a bypass: hard
+#: restrictions stay enforced in both modes.
+EXECUTION_NORMAL = "normal"
+EXECUTION_TURBO = "turbo"
+EXECUTION_MODES = frozenset({EXECUTION_NORMAL, EXECUTION_TURBO})
+
 
 @dataclass
 class RunRequest:
@@ -32,6 +40,7 @@ class RunRequest:
     model: str = "openai/gpt-oss-120b"
     provider: str = "groq"
     input_mode: str = "text"  # "text" | "voice"
+    execution_mode: str = EXECUTION_NORMAL  # "normal" | "turbo"
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     conversation: List[Dict[str, Any]] = field(default_factory=list)
     context_summary: str = ""
@@ -47,6 +56,7 @@ class RunRequest:
             "model": self.model,
             "provider": self.provider,
             "input_mode": self.input_mode,
+            "execution_mode": self.execution_mode,
             "attachments": self.attachments,
             "conversation": self.conversation,
             "context_summary": self.context_summary,
@@ -127,6 +137,8 @@ class ToolContext:
     approved: bool = False
     timeout_s: int = 30
     permissions: List[str] = field(default_factory=list)
+    #: Copied from RunRequest.execution_mode; read by the permission engine.
+    execution_mode: str = EXECUTION_NORMAL
 
     def has_permission(self, permission: str) -> bool:
         if self.approved:
@@ -191,6 +203,9 @@ class MemoryProvider(Protocol):
 
 
 __all__ = [
+    "EXECUTION_NORMAL",
+    "EXECUTION_TURBO",
+    "EXECUTION_MODES",
     "RunRequest",
     "RunOutcome",
     "TERMINAL_STATUSES",

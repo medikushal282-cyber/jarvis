@@ -67,9 +67,17 @@ def kill_process_tree(pid: int, timeout: float = 1.0) -> None:
             pass
 
 
+def _get_workspace(context: Optional[ToolContext] = None):
+    if context and context.workspace_root and context.workspace_root not in (".", ""):
+        return get_workspace_manager(workspace_id=context.workspace_id, root_path=context.workspace_root)
+    if context and context.workspace_id:
+        return get_workspace_manager(workspace_id=context.workspace_id)
+    return get_workspace_manager()
+
 class RunCommandTool(Tool):
     name = "run_command"
     description = "Executes a safe shell command inside the workspace root."
+    risk = "high"
     parameters = {
         "type": "object",
         "properties": {
@@ -112,7 +120,7 @@ class RunCommandTool(Tool):
                 }
             )
 
-        ws = get_workspace_manager()
+        ws = _get_workspace(context)
         cwd = ws.root_path
         cmd_str = " ".join(command) if isinstance(command, list) else str(command)
         start_time = time.time()
@@ -207,6 +215,7 @@ class RunCommandTool(Tool):
 class TerminalExecTool(RunCommandTool):
     name = "exec"
     description = "Executes a shell command in workspace (alias for run_command)."
+    risk = "high"
 
 
 class TerminalSession:

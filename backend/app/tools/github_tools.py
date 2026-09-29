@@ -36,6 +36,7 @@ def make_github_request(endpoint: str, method: str = "GET", data: Optional[Dict]
 class GitHubGetRepoTool(Tool):
     name = "github_get_repo"
     description = "Retrieves information about a GitHub repository."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -58,6 +59,7 @@ class GitHubGetRepoTool(Tool):
 class GitHubListIssuesTool(Tool):
     name = "github_list_issues"
     description = "Lists issues for a GitHub repository."
+    risk = "low"
     parameters = {
         "type": "object",
         "properties": {
@@ -82,6 +84,7 @@ class GitHubListIssuesTool(Tool):
 class GitHubCreateIssueTool(Tool):
     name = "github_create_issue"
     description = "Creates an issue in a GitHub repository."
+    risk = "high"
     parameters = {
         "type": "object",
         "properties": {
@@ -109,6 +112,7 @@ class GitHubCreateIssueTool(Tool):
 class GitHubCreatePRTool(Tool):
     name = "github_create_pr"
     description = "Creates a Pull Request in a GitHub repository."
+    risk = "high"
     parameters = {
         "type": "object",
         "properties": {

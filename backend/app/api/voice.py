@@ -29,7 +29,7 @@ router = APIRouter(prefix="/voice", tags=["Voice"])
 class SynthesizeRequest(BaseModel):
     text: str
     voice: Optional[str] = None
-    format: str = "mp3"
+    format: Optional[str] = None  # defaults to config.TTS_FORMAT (wav for Orpheus)
     speakable: bool = True
 
 

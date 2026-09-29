@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/schemas/tool.schema.json",
+  "title": "ToolRegistryFile",
+  "description": "Shape of a config/tools/*.yaml file. Validated at load time; a file that fails validation is rejected with the offending path, and hot-reload keeps the previous good version rather than half-applying.",
+  "x-contract-version": "1.0.0",
+  "type": "object",
+  "required": ["version", "tools"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/tool" }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "required": ["name", "description", "provider", "method", "parameters", "permission", "timeout_s", "idempotent", "side_effects"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "description": "Unique across the whole registry. snake_case. This is the name the model calls, so it must be stable — renaming it invalidates remembered experience that references it."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 40,
+          "description": "What the tool does AND when to reach for it, including the cases where it is the wrong choice. This text is the model's only guidance on selection, so a one-line description is a defect."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Capability name resolved through config/providers.yaml, e.g. observability. Never a module path."
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Method on the resolved provider adapter."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "JSON Schema for the arguments, passed verbatim to the tool-calling API. Constraints belong here rather than in prose: an enum prevents an invented metric name, a maximum prevents an unbounded window.",
+          "required": ["type", "properties"],
+          "properties": {
+            "type": { "type": "string", "const": "object" },
+            "properties": { "type": "object" },
+            "required": { "type": "array", "items": { "type": "string" } },
+            "additionalProperties": { "type": "boolean", "description": "Must be false. Extra arguments are rejected locally rather than sent and 400'd." }
+          }
+        },
+        "permission": {
+          "type": "string",
+          "enum": ["auto", "confirm", "deny"],
+          "description": "auto = runs unattended; confirm = needs per-call human approval; deny = never runs. Enforced by the policy engine before the call leaves the loop, and not overridable by the model."
+        },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0 },
+        "retry": {
+          "type": "object",
+          "required": ["max_attempts"],
+          "properties": {
+            "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "backoff": { "type": "string", "enum": ["fixed", "exponential"], "default": "exponential" },
+            "base_delay_s": { "type": "number", "minimum": 0, "default": 0.5 },
+            "jitter": { "type": "boolean", "default": true },
+            "retry_on": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["timeout", "rate_limited", "provider_5xx", "connection"] },
+              "description": "Only transient classes belong here. Retrying a validation error is a defect, so `validation` is not an allowed value."
+            }
+          }
+        },
+        "idempotent": {
+          "type": "boolean",
+          "description": "True when repeating the call with identical arguments is safe. The recovery ladder is allowed to blind-retry only idempotent tools."
+        },
+        "side_effects": {
+          "type": "string",
+          "enum": ["none", "mutating", "destructive"],
+          "description": "none = observes only. mutating = changes state reversibly. destructive = changes state irreversibly or with real blast radius. A `destructive` tool may not be `auto`; the loader rejects that combination."
+        },
+        "returns": { "type": "string", "description": "A short sketch of the result shape, for the model and for the docs generator." },
+        "redact": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Field paths scrubbed before the result is logged, emitted in an event, or placed in the prompt. Redaction happens before event construction, not at serialisation."
+        }
+      },
+      "allOf": [
+        {
+          "description": "A destructive tool can never be auto: unbounded blast radius must reach a human.",
+          "if": { "properties": { "side_effects": { "const": "destructive" } }, "required": ["side_effects"] },
+          "then": { "properties": { "permission": { "enum": ["confirm", "deny"] } } }
+        },
+        {
+          "description": "A deny-tier tool must not also claim retry behaviour that implies it may run.",
+          "if": { "properties": { "permission": { "const": "deny" } }, "required": ["permission"] },
+          "then": { "properties": { "retry": { "properties": { "max_attempts": { "const": 1 } } } } }
+        }
+      ]
+    }
+  }
+}

@@ -20,6 +20,12 @@ from app.runtime.events.bus import bus
 from app.runtime.events.sse import resolve_from_seq, sse_response, stream_run
 from app.runtime.ids import LOCAL_USER_ID, resolve_within
 from app.runtime.models import Turn
+from app.runtime.results.artifacts import (
+    captured_file,
+    locate,
+    public_artifact,
+    public_result,
+)
 from app.runtime.sessions.service import run_service
 from app.runtime.sessions.store import run_store, session_store, workspace_store
 
@@ -59,9 +65,12 @@ class StartRunRequest(BaseModel):
     model: Optional[str] = None
     provider: Optional[str] = None
     input_mode: str = "text"
+    execution_mode: str = "normal"
     workspace_id: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
     audio_url: Optional[str] = None
+    #: Transcript details when input_mode is "voice" (confidence, duration_s, ...).
+    voice: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -169,6 +178,10 @@ def get_session(session_id: str, workspace_id: Optional[str] = None):
 
     payload = session.to_dict()
     payload["runs"] = run_store.list_for_session(session.id, session.workspace_id)
+    for turn in payload["turns"]:
+        meta = turn.get("metadata") or {}
+        if meta.get("artifacts"):
+            meta["artifacts"] = [public_artifact(a) for a in meta["artifacts"]]
     # Legacy alias: the current UI reads `messages`.
     payload["messages"] = payload["turns"]
     return payload
@@ -272,8 +285,10 @@ async def start_session_run(session_id: str, req: StartRunRequest, request: Requ
             model=req.model,
             provider=req.provider,
             input_mode=req.input_mode,
+            execution_mode=req.execution_mode,
             attachments=[a.model_dump() for a in (req.attachments or [])],
             audio_url=req.audio_url,
+            voice=req.voice,
         )
     except ValueError as exc:
         raise _bad_request(exc)
@@ -290,7 +305,7 @@ def session_artifacts(session_id: str, workspace_id: Optional[str] = None):
     for summary in runs:
         result = run_service.get_result(summary["id"], workspace_id)
         for artifact in (result or {}).get("artifacts", []):
-            out.append({**artifact, "run_id": summary["id"]})
+            out.append({**public_artifact(artifact), "run_id": summary["id"]})
     return {"artifacts": out}
 
 
@@ -365,11 +380,13 @@ def get_run(run_id: str, workspace_id: Optional[str] = None):
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     payload = run.to_dict()
-    # Legacy alias: the current UI reads `state.artifacts` off this response.
+    result = public_result(run.result) or {}
+    payload["result"] = result or None
+    # Legacy alias: older clients read `state.artifacts` off this response.
     payload["state"] = {
-        "artifacts": (run.result or {}).get("artifacts", []),
+        "artifacts": result.get("artifacts", []),
         "status": run.status,
-        "final_response": (run.result or {}).get("reply", ""),
+        "final_response": result.get("reply", ""),
     }
     return payload
 
@@ -382,7 +399,7 @@ def get_run_result(run_id: str, workspace_id: Optional[str] = None):
         raise _bad_request(exc)
     if result is None:
         raise HTTPException(status_code=404, detail=f"No result for run '{run_id}'")
-    return result
+    return public_result(result)
 
 
 @runs_router.get("/{run_id}/artifacts")
@@ -393,17 +410,25 @@ def get_run_artifacts(run_id: str, workspace_id: Optional[str] = None):
         raise _bad_request(exc)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-    return {"artifacts": result.get("artifacts", [])}
+    return {"artifacts": [public_artifact(a) for a in result.get("artifacts", [])]}
 
 
 @runs_router.get("/{run_id}/artifacts/{artifact_id}")
-def serve_artifact(run_id: str, artifact_id: str, workspace_id: Optional[str] = None):
+def serve_artifact(
+    run_id: str,
+    artifact_id: str,
+    workspace_id: Optional[str] = None,
+    download: bool = False,
+):
     """Serve one produced file.
 
-    A file-serving endpoint keyed by user input is exactly the shape of a
-    traversal bug, so the resolved path is re-checked against the workspace
-    root even though the id came from our own result.
+    Looked up by id in the run's own result, never by a path from the
+    request. The file is taken from the copy captured when the run ended,
+    else from wherever the tools wrote it -- each candidate root re-checked
+    for containment.
     """
+    from fastapi.responses import RedirectResponse
+
     try:
         run = run_service.get_run(run_id, workspace_id)
         result = run_service.get_result(run_id, workspace_id)
@@ -421,39 +446,63 @@ def serve_artifact(run_id: str, artifact_id: str, workspace_id: Optional[str] = 
     if artifact.get("type") == "url":
         return JSONResponse({"url": artifact.get("url")})
 
-    rel = artifact.get("path")
-    if not rel:
-        raise HTTPException(status_code=404, detail="Artifact has no file")
-
-    ws_dir = workspace_store.dir_for(run.workspace_id)
-    candidates = [
-        run_store.artifacts_dir(run.workspace_id, run.id) / Path(rel).name,
-        None,
-    ]
-    try:
-        candidates[1] = resolve_within(ws_dir, rel)
-    except ValueError as exc:
-        raise _bad_request(exc)
-
-    target = next((p for p in candidates if p and p.is_file()), None)
+    target = captured_file(run_store.artifacts_dir(run.workspace_id, run.id), artifact_id)
+    if target is None and artifact.get("path"):
+        target = locate(run.workspace_id, artifact["path"])
     if target is None:
+        # Registered by the tool layer and served by it (/api/artifacts/...).
+        own = artifact.get("preview_url") or ""
+        if own.startswith("/api/artifacts/"):
+            return RedirectResponse(own, status_code=307)
         raise HTTPException(status_code=404, detail="Artifact file is gone")
 
-    mime = artifact.get("mime") or mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-    inline = mime.startswith(("text/", "image/")) or mime in (
-        "application/json", "application/pdf",
+    name = artifact.get("name") or target.name
+    mime = artifact.get("mime") or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    inline = not download and (
+        mime.startswith(("text/", "image/")) or mime in ("application/json", "application/pdf")
     )
+    # Header injection guard: no quotes or line breaks in the filename.
+    safe_name = "".join(ch for ch in name if ch not in '"\r\n')
     headers = {
-        "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename=\"{target.name}\""
+        "Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{safe_name}"',
+        "X-Content-Type-Options": "nosniff",
     }
     if mime in ("text/html", "image/svg+xml"):
         # Agent-generated HTML served from our own origin: lock it down.
         headers["Content-Security-Policy"] = (
             "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
         )
-        headers["X-Content-Type-Options"] = "nosniff"
 
     return FileResponse(target, media_type=mime, headers=headers)
+
+
+class PermissionDecision(BaseModel):
+    decision: str  # "approve" | "deny"
+
+
+@runs_router.get("/{run_id}/permissions")
+def pending_permissions(run_id: str):
+    """What this run is waiting on the user for (INTERFACES.md 3.5)."""
+    from app.runtime.approvals import approvals
+
+    return {"run_id": run_id, "pending": approvals.pending_for(run_id)}
+
+
+@runs_router.post("/{run_id}/permissions/{request_id}")
+def decide_permission(run_id: str, request_id: str, body: PermissionDecision):
+    """The user's answer to a permission request. The run resumes in place."""
+    from app.runtime.approvals import approvals
+
+    choice = body.decision.strip().lower()
+    if choice not in ("approve", "allow", "deny", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'deny'")
+    approve = choice in ("approve", "allow")
+    outcome = approvals.resolve(run_id, request_id, approve)
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="No such pending request for this run")
+    if outcome == "decided":
+        raise HTTPException(status_code=409, detail="This request was already answered")
+    return {"run_id": run_id, "request_id": request_id, "decision": "approved" if approve else "denied"}
 
 
 @runs_router.post("/{run_id}/cancel")

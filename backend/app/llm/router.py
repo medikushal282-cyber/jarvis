@@ -280,8 +280,15 @@ def call_litellm(
     model: str,
     provider: str = "groq",
     tools: Optional[List[Dict[str, Any]]] = None,
+    run_id: Optional[str] = None,
+    turn_idx: Optional[int] = None,
+    worker_id: Optional[str] = None,
 ) -> str:
     import litellm
+    import logging
+    import time
+    logger = logging.getLogger(__name__)
+
     prov = (provider or "groq").lower()
     model_str = model or "openai/gpt-oss-120b"
 
@@ -297,7 +304,7 @@ def call_litellm(
     elif prov == "anthropic":
         if not model_str.startswith("anthropic/"):
             model_str = f"anthropic/{model_str}"
-    
+
     kwargs: Dict[str, Any] = {
         "model": model_str,
         "messages": [
@@ -309,19 +316,24 @@ def call_litellm(
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
+    start_time = time.time()
+    success = False
+    rate_limit = False
+    p_tokens = 0
+    c_tokens = 0
+    t_tokens = 0
+
     try:
         response = litellm.completion(**kwargs)
-        
+        success = True
+
         usage = getattr(response, "usage", None)
         if usage:
             p_tokens = getattr(usage, "prompt_tokens", 0)
             c_tokens = getattr(usage, "completion_tokens", 0)
             t_tokens = getattr(usage, "total_tokens", 0)
-            print(f"[TOKEN USAGE] Model: {model_str} | Prompt: {p_tokens} | Completion: {c_tokens} | Total: {t_tokens}")
 
         message = response.choices[0].message
-        
-        # Check for native function / tool calls
         tool_calls = getattr(message, "tool_calls", None)
         content = message.content or ""
 
@@ -337,23 +349,29 @@ def call_litellm(
                     except Exception:
                         parsed_args = {"raw": str(fn_args)}
                     rendered_calls.append(f"<tool_call>\n{json.dumps({'name': fn_name, 'arguments': parsed_args})}\n</tool_call>")
-            
+
             tool_str = "\n".join(rendered_calls)
             return f"{content}\n{tool_str}".strip() if content else tool_str
 
         return content
     except Exception as exc:
-        # Handle Groq's failed_generation if model generated a tool format string
-        err_msg = str(exc)
+        err_msg = str(exc).lower()
+        if any(k in err_msg for k in ["rate_limit", "429", "too many requests"]):
+            rate_limit = True
         if "failed_generation" in err_msg:
             try:
-                match = re.search(r'"failed_generation":\s*"({.*?})"', err_msg)
+                import re
+                match = re.search(r'"failed_generation":\s*"({.*?})"', str(exc))
                 if match:
                     raw_json_str = match.group(1).encode().decode('unicode-escape')
+                    success = True
                     return f"<tool_call>\n{raw_json_str}\n</tool_call>"
             except Exception:
                 pass
         raise exc
+    finally:
+        duration_ms = int((time.time() - start_time) * 1000)
+        print(f"LLM_REQUEST: worker_id={worker_id}, provider={prov}, model={model_str}, run_id={run_id}, turn={turn_idx}, prompt_tokens={p_tokens}, completion_tokens={c_tokens}, total_tokens={t_tokens}, duration_ms={duration_ms}, success={success}, rate_limit={rate_limit}")
 
 
 def call_llm(
@@ -363,6 +381,8 @@ def call_llm(
     provider: str = "groq",
     tools: Optional[List[Dict[str, Any]]] = None,
     emit: Optional[Any] = None,
+    run_id: Optional[str] = None,
+    turn_idx: Optional[int] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Unified LLM router using LiteLLM to route to Groq, Ollama, OpenAI, or Anthropic.
@@ -370,63 +390,133 @@ def call_llm(
     """
     from app.llm.workers import load_workers, mark_worker_error, mark_worker_used
     import time
-    
+    import logging
+    logger = logging.getLogger(__name__)
+
     workers = load_workers()
-    now = time.time()
-    
-    healthy_workers = [w for w in workers if w.get("enabled", True) and w.get("cooldown_until", 0) <= now]
-    healthy_workers.sort(key=lambda x: x.get("priority", 0), reverse=True)
-    
-    if not healthy_workers:
+
+    if not workers:
         # Fallback to standard environment keys if NO workers configured at all
-        if not workers:
-            try:
-                raw_response = call_litellm(system, user, model, provider, tools=tools)
-                return extract_thoughts(raw_response)
-            except Exception as e:
-                raise Exception(f"LLM provider error: {e}")
-        else:
-            raise Exception("JARVIS couldn't complete this task because all configured execution workers are currently unavailable.")
+        try:
+            raw_response = call_litellm(system, user, model, provider, tools=tools, run_id=run_id, turn_idx=turn_idx)
+            return extract_thoughts(raw_response)
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in ["rate_limit", "429", "too many requests"]):
+                import re
+                cooldown_s = 30
+                try:
+                    match = re.search(r'try again in (\d+\.?\d*)s', err_str)
+                    if match:
+                        cooldown_s = int(float(match.group(1))) + 2
+                except Exception:
+                    pass
+                    
+                if 0 < cooldown_s <= 60:
+                    if emit:
+                        emit("worker_switching", {"message": f"Rate limited. Waiting {cooldown_s}s for retry-after to expire before trying again..."}, node="agent")
+                    logger.info(f"Fallback rate limited. Waiting {cooldown_s}s.")
+                    import time
+                    time.sleep(cooldown_s)
+                    try:
+                        raw_response = call_litellm(system, user, model, provider, tools=tools, run_id=run_id, turn_idx=turn_idx)
+                        if emit:
+                            emit("worker_connected", {"message": "Resumed successfully after rate limit cooldown."}, node="agent")
+                        return extract_thoughts(raw_response)
+                    except Exception as retry_e:
+                        raise Exception(f"LLM provider error (after rate-limit retry): {retry_e}")
+                
+            raise Exception(f"LLM provider error: {e}")
+
+    MAX_RETRIES = len(workers) * 2 
+    attempts = 0
+    failures = []
+
+    while attempts < MAX_RETRIES:
+        now = time.time()
+        healthy_workers = [w for w in workers if w.get("enabled", True) and w.get("cooldown_until", 0) <= now]
+        healthy_workers.sort(key=lambda x: (-x.get("priority", 0), x.get("last_used_at", 0)))
+
+        if not healthy_workers:
+            # If no healthy workers available right now, let's see if any are just in cooldown
+            enabled_workers = [w for w in workers if w.get("enabled", True)]
+            if not enabled_workers:
+                raise Exception("JARVIS couldn't complete task. All configured workers are currently DISABLED.")
+                
+            # Find the soonest cooldown to expire
+            soonest_worker = min(enabled_workers, key=lambda w: w.get("cooldown_until", now + 999))
+            wait_time = soonest_worker.get("cooldown_until", now) - now
             
-    last_err = None
-    for w in healthy_workers:
+            if 0 < wait_time <= 60:
+                if emit:
+                    emit("worker_switching", {"message": f"All workers in cooldown. Waiting {int(wait_time)}s for rate limit reset..."}, node="agent")
+                logger.info(f"All workers exhausted. Waiting {wait_time}s for retry-after to expire.")
+                import asyncio
+                # time.sleep is fine since we're in to_thread, but let's just use time.sleep. 
+                # The user said "If it uses time.sleep(...) and executes inside async...". 
+                # It does not execute inside async, it executes in a thread pool. But let's be safe.
+                time.sleep(wait_time + 1)
+                # Reload workers after sleep
+                workers = load_workers()
+                continue
+            else:
+                # Cooldown is too long or something else is wrong
+                break
+
+        w = healthy_workers[0]
         wid = w["worker_id"]
         w_model = w["model"]
         w_prov = w["provider"]
         api_key = w.get("api_key")
-        
-        if emit:
+        credential_env = w.get("credential_env")
+        if credential_env and credential_env in os.environ:
+            api_key = os.environ[credential_env]
+
+
+        if emit and attempts > 0:
             emit("worker_switching", {"message": f"Switching execution worker to {w_prov} ({w_model})..."}, node="agent")
-            
+            emit("worker_selected", {"worker_id": wid}, node="agent")
+
         try:
             env_key = f"{w_prov.upper()}_API_KEY"
             old_key = os.environ.get(env_key)
             if api_key:
                 os.environ[env_key] = api_key
-                
-            raw_response = call_litellm(system, user, w_model, w_prov, tools=tools)
-            
+
+            raw_response = call_litellm(system, user, w_model, w_prov, tools=tools, run_id=run_id, turn_idx=turn_idx, worker_id=wid)
+
             if api_key:
                 if old_key is not None:
                     os.environ[env_key] = old_key
                 else:
                     del os.environ[env_key]
-                
+
             mark_worker_used(wid)
-            if emit:
-                emit("worker_connected", {"message": "Worker connected — continuing."}, node="agent")
+            if emit and attempts > 0:
+                emit("worker_connected", {"message": f"Worker connected ({wid}) — continuing execution."}, node="agent")
             return extract_thoughts(raw_response)
-            
+
         except Exception as e:
-            last_err = e
+            attempts += 1
             if api_key:
                 if old_key is not None:
                     os.environ[env_key] = old_key
                 elif env_key in os.environ:
                     del os.environ[env_key]
-            
+
             err_str = str(e).lower()
-            if any(k in err_str for k in ["rate_limit", "429", "timeout", "connection", "overloaded", "groqexception"]):
+            is_rate_limit = any(k in err_str for k in ["rate_limit", "429", "too many requests"])
+            
+            failures.append({
+                "worker_id": wid,
+                "provider": w_prov,
+                "model": w_model,
+                "error_type": type(e).__name__,
+                "message": str(e),
+                "rate_limit": is_rate_limit
+            })
+
+            if is_rate_limit:
                 import re
                 cooldown_s = 30
                 try:
@@ -436,13 +526,24 @@ def call_llm(
                 except Exception:
                     pass
                 mark_worker_error(wid, str(e), cooldown_s)
+                
+                workers = load_workers()
                 if emit:
                     emit("worker_cooldown", {"worker_id": wid, "reason": "rate_limit", "cooldown_s": cooldown_s}, node="agent")
             else:
+                # For non-rate-limit errors, we also mark it as failed with a generic cooldown so we try the next worker
                 mark_worker_error(wid, str(e), 60)
+                workers = load_workers()
                 if emit:
                     emit("worker_failed", {"worker_id": wid, "reason": "execution_failed"}, node="agent")
             continue
-            
-    raise Exception("JARVIS couldn't complete this task because all configured execution workers are currently unavailable.")
 
+    # If we exit the loop, we've failed completely
+    if not failures:
+        raise Exception("JARVIS couldn't complete task. No workers could be attempted (possibly all disabled or in long cooldown).")
+        
+    error_lines = ["JARVIS exhausted configured workers. Failures:"]
+    for f in failures:
+        error_lines.append(f"- Worker {f['worker_id']} ({f['provider']}/{f['model']}) failed. RateLimit: {f['rate_limit']}. Error: {f['error_type']}: {f['message']}")
+        
+    raise Exception("\n".join(error_lines))

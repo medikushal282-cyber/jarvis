@@ -1,7 +1,6 @@
 from app.tools.base import Tool, ToolResult, ToolContext
 from app.tools.registry import ToolRegistry, get_tool_registry
 
-# Filesystem Tools
 from app.tools.filesystem import (
     ListDirectoryTool,
     ReadFileTool,
@@ -12,6 +11,7 @@ from app.tools.filesystem import (
     MoveFileTool,
     RenameFileTool,
     CopyFileTool,
+    CopyFileLegacyTool,
     CreateDirectoryTool,
     AppendFileTool,
     PatchFileTool,
@@ -85,6 +85,26 @@ from app.tools.vision_tools import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Compatibility Aliases
+# ---------------------------------------------------------------------------
+# These alias classes route through the same permission/security layer as
+# their originals. They exist purely for API name compatibility.
+
+
+class _ListFilesAlias(ListDirectoryTool):
+    """list_files → list_directory compatibility alias."""
+    name = "list_files"
+    description = "Lists files and directories in a workspace path (alias for list_directory)."
+
+
+class _EditFileAlias(PatchFileTool):
+    """edit_file → patch_file compatibility alias for find-and-replace editing."""
+    name = "edit_file"
+    description = "Finds and replaces text within a file (alias for patch_file). " \
+                  "Use for targeted edits to existing files."
+
+
 def _init_default_registry(reg: ToolRegistry) -> None:
     tools_to_register = [
         # Filesystem
@@ -97,6 +117,7 @@ def _init_default_registry(reg: ToolRegistry) -> None:
         MoveFileTool(),
         RenameFileTool(),
         CopyFileTool(),
+        CopyFileLegacyTool(),   # copy_file compatibility alias
         CreateDirectoryTool(),
         AppendFileTool(),
         PatchFileTool(),
@@ -104,6 +125,9 @@ def _init_default_registry(reg: ToolRegistry) -> None:
         ListDirectoryTreeTool(),
         DiffFilesTool(),
         SearchFilesTool(),
+        # Filesystem compatibility aliases (list_files, edit_file)
+        _ListFilesAlias(),
+        _EditFileAlias(),
         # Terminal
         RunCommandTool(),
         TerminalExecTool(),

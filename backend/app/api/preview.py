@@ -66,7 +66,7 @@ async def open_in_browser(workspace_id: str, req: OpenBrowserRequest):
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {req.file_path}")
     
-    url = f"http://localhost:8000/api/preview/{workspace_id}/{req.file_path}"
+    url = f"http://localhost:8006/api/preview/{workspace_id}/{req.file_path}"
     try:
         # Try opening via Python webbrowser module (opens default browser e.g. Chrome/Chromium/Edge)
         opened = webbrowser.open(url)

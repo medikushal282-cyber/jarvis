@@ -29,7 +29,15 @@ SSE_HEADERS = {
 
 
 def frame(envelope: dict) -> str:
-    """Render one event as an SSE frame."""
+    """Render one event as an SSE frame.
+
+    Deliberately no ``event:`` field. A browser ``EventSource`` only hands
+    unnamed frames to ``onmessage``; a named frame goes solely to an
+    ``addEventListener(name)`` handler. Every client listens on
+    ``onmessage`` and reads the name from the JSON body, so naming frames
+    silently delivered nothing -- the run finished server-side and the page
+    saw only the connection close.
+    """
     seq = envelope.get("seq", 0)
     body = json.dumps(envelope, default=str)
     if seq:

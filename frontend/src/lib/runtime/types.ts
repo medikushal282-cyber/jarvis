@@ -96,18 +96,29 @@ export interface RunSummary {
 
 // --- results ----------------------------------------------------------------
 
+/**
+ * An artifact as the API publishes it: the public contract (INTERFACES.md
+ * 3.6) plus display fields. Never carries a filesystem path.
+ */
 export interface Artifact {
   id: string;
   type: "file" | "url" | "image" | "data";
   name: string;
   action: "created" | "modified" | "deleted";
-  path?: string;
   url?: string;
   bytes: number;
   mime?: string | null;
   created_at?: string | null;
   preview_url?: string;
   run_id?: string;
+  // Public contract fields
+  artifact_id?: string;
+  filename?: string;
+  mime_type?: string | null;
+  size?: number;
+  preview_supported?: boolean;
+  secure_url?: string | null;
+  download_url?: string | null;
 }
 
 export interface ActionSummary {
@@ -192,6 +203,25 @@ export interface Transcript {
   model?: string;
   audio_url?: string | null;
   message?: string;
+}
+
+// --- workers ----------------------------------------------------------------
+
+/** HEALTHY and READY both mean "usable"; the UI shows both as READY. */
+export type WorkerStatus = "HEALTHY" | "READY" | "COOLDOWN" | "DISABLED" | "ERROR";
+
+export interface WorkerSummary {
+  worker_id: string;
+  provider: string;
+  model: string;
+  display_name?: string;
+  enabled?: boolean;
+  priority?: number;
+  status: WorkerStatus | string;
+  cooldown_remaining?: number;
+  /** Last four characters only; the full key never reaches the browser. */
+  api_key_hint?: string;
+  last_error_hint?: string | null;
 }
 
 export type ConnectionState =

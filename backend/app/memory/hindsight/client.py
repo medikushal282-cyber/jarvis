@@ -51,8 +51,24 @@ class HindsightClient:
         Stores an experience in Hindsight.
         """
         if self.endpoint_url:
-            # TODO: Implement real HTTP POST to Hindsight
-            logger.info("Real Hindsight HTTP store not fully implemented, using mock.")
+            import urllib.request
+            try:
+                data = {
+                    "user_id": user_id,
+                    "content": content,
+                    "metadata": metadata,
+                    "timestamp": time.time()
+                }
+                req = urllib.request.Request(
+                    f"{self.endpoint_url}/api/v1/experiences",
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=5.0) as res:
+                    resp_data = json.loads(res.read().decode())
+                    return resp_data.get("id", "")
+            except Exception as e:
+                logger.warning(f"Real Hindsight HTTP store failed, falling back to mock: {e}")
             
         experiences = self._read_db()
         exp_id = f"exp_{uuid.uuid4().hex[:8]}"
@@ -74,8 +90,19 @@ class HindsightClient:
         Uses basic keyword matching for the mock implementation.
         """
         if self.endpoint_url:
-            # TODO: Implement real HTTP GET to Hindsight
-            logger.info("Real Hindsight HTTP search not fully implemented, using mock.")
+            import urllib.request
+            import urllib.parse
+            try:
+                params = {"user_id": user_id, "query": query, "limit": limit}
+                if filters:
+                    params["filters"] = json.dumps(filters)
+                qs = urllib.parse.urlencode(params)
+                req = urllib.request.Request(f"{self.endpoint_url}/api/v1/search?{qs}")
+                with urllib.request.urlopen(req, timeout=5.0) as res:
+                    resp_data = json.loads(res.read().decode())
+                    return resp_data.get("results", [])
+            except Exception as e:
+                logger.warning(f"Real Hindsight HTTP search failed, falling back to mock: {e}")
 
         experiences = self._read_db()
         

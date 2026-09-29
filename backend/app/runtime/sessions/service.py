@@ -88,10 +88,23 @@ class RunService:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         input_mode: str = "text",
+        execution_mode: str = "normal",
         attachments: Optional[List[Dict[str, Any]]] = None,
         audio_url: Optional[str] = None,
+        voice: Optional[Dict[str, Any]] = None,
     ) -> Run:
         """Steps 1-6. Returns as soon as the run is dispatched."""
+        from app.runtime.approvals import approvals
+        from app.runtime.protocols import EXECUTION_MODES
+
+        # Tools run in worker threads; they reach the approval channel
+        # through this loop.
+        approvals.bind_loop(asyncio.get_running_loop())
+
+        if execution_mode not in EXECUTION_MODES:
+            raise ValueError(
+                f"execution_mode must be one of {sorted(EXECUTION_MODES)}"
+            )
         session = self.ensure_session(
             session_id, workspace_id, user_id, title=objective[:60] or "New Session"
         )
@@ -105,8 +118,15 @@ class RunService:
             model=model or config.DEFAULT_MODEL,
             provider=provider or config.DEFAULT_PROVIDER,
             input_mode=input_mode,
+            execution_mode=execution_mode,
             status=RUN_PENDING,
         )
+        # Stored so _build_request can hand them to the brain; they were
+        # accepted here but dropped before, so attachments never arrived.
+        run.metadata["attachments"] = list(attachments or [])
+        voice_meta = _voice_meta(voice) if input_mode == "voice" else {}
+        if voice_meta:
+            run.metadata["voice"] = voice_meta
 
         # Step 2: the user's turn is recorded before anything can fail.
         async with self.sessions.lock(session.id):
@@ -118,6 +138,7 @@ class RunService:
                     input_mode=input_mode,
                     run_id=run.id,
                     audio_url=audio_url,
+                    metadata={"voice": voice_meta} if voice_meta else {},
                 ),
                 session.workspace_id,
             )
@@ -131,6 +152,13 @@ class RunService:
             session_id=session.id,
             user_id=session.user_id,
         )
+
+        # How the request arrived, for the timeline. Emitted by the runtime
+        # before the brain starts, so it may precede run_started.
+        if input_mode == "voice":
+            get_emitter(run.id, "runtime")(
+                "voice_transcribed", {"text": objective, **voice_meta}
+            )
 
         task = asyncio.create_task(self._execute(run, session))
         _active_tasks[run.id] = task
@@ -189,6 +217,7 @@ class RunService:
             model=run.model,
             provider=run.provider,
             input_mode=run.input_mode,
+            execution_mode=run.execution_mode,
             attachments=run.metadata.get("attachments", []),
             conversation=session.recent_turns(6),
             context_summary=session.context_summary,
@@ -206,6 +235,11 @@ class RunService:
         emit,
     ) -> None:
         try:
+            # Nothing may stay waiting for an answer once the run is over.
+            from app.runtime.approvals import approvals
+
+            approvals.cancel_run(run.id)
+
             # The brain may have returned without a terminal event.
             if stream.terminal_event is None and run.status != RUN_CANCELLED:
                 if failure is not None:
@@ -234,6 +268,11 @@ class RunService:
             events = stream.history(0) or self.runs.read_events(run.id, run.workspace_id)
             builder.add_all(events)
             result = builder.build()
+            # Keep this run's version of each produced file, even if a later
+            # run overwrites the original.
+            from app.runtime.results.artifacts import capture
+
+            result = capture(result, run.workspace_id, self.runs.artifacts_dir(run.workspace_id, run.id))
 
             run.event_count = result.get("event_count", 0)
             run.ended_at = utc_now()
@@ -331,6 +370,23 @@ class RunService:
             if events:
                 return events
         return self.runs.read_events(run_id, workspace_id, from_seq)
+
+
+_VOICE_FIELDS = {"confidence": float, "duration_s": float, "model": str, "language": str}
+
+
+def _voice_meta(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep only known transcript fields, with sane types."""
+    out: Dict[str, Any] = {}
+    for key, kind in _VOICE_FIELDS.items():
+        value = (raw or {}).get(key)
+        if value is None:
+            continue
+        try:
+            out[key] = kind(value) if kind is not str else str(value)[:64]
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 run_service = RunService()

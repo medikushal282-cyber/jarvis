@@ -121,23 +121,98 @@ def test_sensitive_data_redaction():
     assert "gsk_secretkey1234567890" not in summary
     assert "API_KEY=[REDACTED]" in summary
 
-# H & I. KNOWLEDGE PROMOTION (Reflection)
-def test_reflection_promotion(memory_components, monkeypatch):
+
+
+# NEW TESTS FOR REFLECTION FIXES
+
+def test_naked_openai_key_redaction():
+    text = 'My key is sk-proj-1234567890abcdef1234567890abcdef'
+    redacted = MemoryExtractor._redact_secrets(text)
+    assert 'sk-proj-' not in redacted
+    assert '[REDACTED]' in redacted
+
+def test_reflection_promotion_confidence_gate(memory_components, monkeypatch):
     h_adapter, okf, builder, reflector = memory_components
     
-    # Mock call_llm to simulate LLM returning a JSON array of facts
-    def mock_call_llm(system, user, model, provider):
-        return '["User prefers PDF output"]', None
+    def mock_call_llm(system, user):
+        # Return high confidence but low evidence for inferred
+        res = {
+            'candidates': [
+                {
+                    'fact': 'User likes dark mode',
+                    'type': 'inferred_pattern',
+                    'confidence_score': 90,
+                    'evidence_count': 1,
+                    'evidence': ['exp_1']
+                },
+                {
+                    'fact': 'User explicitly said no notifications',
+                    'type': 'explicit_preference',
+                    'confidence_score': 95,
+                    'evidence_count': 1,
+                    'evidence': ['exp_2']
+                },
+                {
+                    'fact': 'User always uses Python',
+                    'type': 'inferred_pattern',
+                    'confidence_score': 85,
+                    'evidence_count': 3,
+                    'evidence': ['exp_1', 'exp_2', 'exp_3']
+                }
+            ]
+        }
+        import json
+        return json.dumps(res), None
         
-    monkeypatch.setattr("app.memory.reflection.call_llm", mock_call_llm)
+    monkeypatch.setattr('app.memory.reflection.call_llm', mock_call_llm)
     
-    # Record some experiences
-    h_adapter.record_execution_experience("user_1", "Generate report", "User requested PDF format", "success")
-    h_adapter.record_execution_experience("user_1", "Generate report 2", "User again requested PDF", "success")
+    h_adapter.record_execution_experience('user_1', 'obj', 'exp 1', 'success')
+    reflector.reflect('user_1', 'obj')
     
-    # Trigger reflection
-    reflector.reflect("user_1", "Generate report")
+    prefs = okf.get_user_knowledge('user_1', 'preferences').get('content', '')
+    # Should reject 'dark mode' (inferred, count 1)
+    assert 'dark mode' not in prefs
+    # Should accept 'no notifications' (explicit, count 1)
+    assert 'no notifications' in prefs
+    # Should accept 'uses Python' (inferred, count 3, conf > 80)
+    assert 'uses Python' in prefs
+
+def test_reflection_invalid_json(memory_components, monkeypatch):
+    h_adapter, okf, builder, reflector = memory_components
     
-    # Verify OKF was updated
-    prefs = okf.get_user_knowledge("user_1", "preferences").get("content", "")
-    assert "User prefers PDF output" in prefs
+    def mock_call_llm(system, user):
+        return 'Not a json object', None
+        
+    monkeypatch.setattr('app.memory.reflection.call_llm', mock_call_llm)
+    
+    h_adapter.record_execution_experience('user_1', 'obj', 'exp 1', 'success')
+    # Should not crash
+    reflector.reflect('user_1', 'obj')
+    prefs = okf.get_user_knowledge('user_1', 'preferences').get('content', '')
+    assert prefs == ''
+
+def test_reflection_secret_rejection(memory_components, monkeypatch):
+    h_adapter, okf, builder, reflector = memory_components
+    
+    def mock_call_llm(system, user):
+        res = {
+            'candidates': [
+                {
+                    'fact': 'User token is sk-proj-123456',
+                    'type': 'explicit_preference',
+                    'confidence_score': 99,
+                    'evidence_count': 2,
+                    'evidence': ['exp_1', 'exp_2']
+                }
+            ]
+        }
+        import json
+        return json.dumps(res), None
+        
+    monkeypatch.setattr('app.memory.reflection.call_llm', mock_call_llm)
+    
+    h_adapter.record_execution_experience('user_1', 'obj', 'exp 1', 'success')
+    reflector.reflect('user_1', 'obj')
+    prefs = okf.get_user_knowledge('user_1', 'preferences').get('content', '')
+    assert 'sk-proj' not in prefs
+

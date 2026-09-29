@@ -187,6 +187,7 @@ def execute_http_request_streamed(
 class HttpGetTool(Tool):
     name = "http_get"
     description = "Performs an HTTP GET request to an external URL with SSRF protection."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -232,6 +233,7 @@ class HttpGetTool(Tool):
 class HttpPostTool(Tool):
     name = "http_post"
     description = "Performs an HTTP POST request to an external URL."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -267,6 +269,7 @@ class HttpPostTool(Tool):
 class HttpPutTool(Tool):
     name = "http_put"
     description = "Performs an HTTP PUT request."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -293,6 +296,7 @@ class HttpPutTool(Tool):
 class HttpPatchTool(Tool):
     name = "http_patch"
     description = "Performs an HTTP PATCH request."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {
@@ -319,6 +323,7 @@ class HttpPatchTool(Tool):
 class HttpDeleteTool(Tool):
     name = "http_delete"
     description = "Performs an HTTP DELETE request."
+    risk = "medium"
     parameters = {
         "type": "object",
         "properties": {

@@ -41,7 +41,7 @@ class Speech:
 
 class TextToSpeech(Protocol):
     async def synthesize(
-        self, text: str, *, voice: Optional[str] = None, fmt: str = "mp3"
+        self, text: str, *, voice: Optional[str] = None, fmt: Optional[str] = None
     ) -> Speech:
         ...
 
@@ -56,7 +56,7 @@ class BrowserTTS:
     client_side = True
 
     async def synthesize(
-        self, text: str, *, voice: Optional[str] = None, fmt: str = "mp3"
+        self, text: str, *, voice: Optional[str] = None, fmt: Optional[str] = None
     ) -> Speech:
         raise SynthesisUnsupported(
             "TTS runs in the browser; call window.speechSynthesis on the client"
@@ -77,11 +77,13 @@ class GroqTTS:
         self.default_voice = voice or config.TTS_VOICE
 
     async def synthesize(
-        self, text: str, *, voice: Optional[str] = None, fmt: str = "mp3"
+        self, text: str, *, voice: Optional[str] = None, fmt: Optional[str] = None
     ) -> Speech:
         import asyncio
 
-        return await asyncio.to_thread(self._sync, text, voice or self.default_voice, fmt)
+        return await asyncio.to_thread(
+            self._sync, text, voice or self.default_voice, fmt or config.TTS_FORMAT
+        )
 
     def _sync(self, text: str, voice: str, fmt: str) -> Speech:
         try:
@@ -101,13 +103,17 @@ class GroqTTS:
                 raise SynthesisError("TTS backend returned no audio")
             return Speech(
                 audio=audio,
-                mime="audio/mpeg" if fmt == "mp3" else f"audio/{fmt}",
+                mime={"mp3": "audio/mpeg", "wav": "audio/wav"}.get(fmt, f"audio/{fmt}"),
                 voice=voice,
                 model=self.model,
             )
         except SynthesisError:
             raise
         except Exception as exc:  # noqa: BLE001
+            if "model_terms_required" in str(exc):
+                raise SynthesisError(
+                    f"The Groq org admin must accept the terms for {self.model} in the Groq console first"
+                ) from exc
             raise SynthesisError(f"TTS failed: {exc}") from exc
 
     def voices(self) -> List[Dict[str, Any]]:

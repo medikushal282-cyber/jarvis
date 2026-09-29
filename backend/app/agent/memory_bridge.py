@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from app.memory.api import build_context as memory_build_context
 from app.memory.api import record_experience as memory_record_experience
+from app.memory.api import reflect as memory_reflect
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,14 @@ class AgentMemoryBridge:
                 execution_state=outcome,
                 session_id=outcome.get("session_id"),
                 project_id=outcome.get("workspace_id"),
+            )
+            
+            # Trigger reflection after recording
+            await asyncio.to_thread(
+                memory_reflect,
+                user_id=user_id or "usr_local",
+                objective=objective,
+                project_id=outcome.get("workspace_id")
             )
             return exp_id or ""
         except Exception as exc:  # noqa: BLE001

@@ -1,11 +1,94 @@
-from typing import Dict, Any, List, Optional
+"""
+app/tools/registry.py — JARVIS Tool Registry
+
+The SINGLE gateway for all capability execution.
+
+Architecture:
+    Agent/Brain → ToolRegistry.execute() → PermissionEngine → Tool → ToolResult
+
+All tool invocations MUST go through this registry.
+No code outside this module should call tool.execute() directly.
+
+Owner: Lohith (Capability / Tool Layer)
+"""
+
+from __future__ import annotations
+
 import logging
-from app.tools.base import Tool, ToolResult, ToolContext
+from typing import Any, Dict, List, Optional
+
+from app.tools.base import Tool, ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
 
+# Maximum chars for tool result data sent to agent (bounded LLM result)
+_LLM_RESULT_MAX_CHARS = 8000
+_LLM_STDOUT_MAX_CHARS = 4000
+
+
+def _bound_string(s: str, max_chars: int, label: str = "content") -> Dict[str, Any]:
+    """Return a bounded dict with truncation metadata."""
+    if len(s) <= max_chars:
+        return {label: s, "truncated": False}
+    return {label: s[:max_chars], "truncated": True, "original_size": len(s)}
+
+
+def _apply_llm_bounds(result: Any) -> Any:
+    """
+    Apply bounded LLM-facing result limits to tool output.
+    Mutates and returns the result dict/value.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    # Bound read_file content
+    if "content" in result and isinstance(result["content"], str):
+        original = result["content"]
+        if len(original) > _LLM_RESULT_MAX_CHARS:
+            result["content"] = original[:_LLM_RESULT_MAX_CHARS]
+            result["truncated"] = True
+            result["original_size"] = len(original)
+
+    # Bound terminal stdout/stderr
+    for key in ("stdout", "stderr"):
+        if key in result and isinstance(result[key], str):
+            val = result[key]
+            if len(val) > _LLM_STDOUT_MAX_CHARS:
+                result[key] = val[:_LLM_STDOUT_MAX_CHARS]
+                result["truncated"] = True
+                result[f"{key}_original_size"] = len(val)
+
+    # Bound directory listings
+    if "entries" in result and isinstance(result["entries"], list):
+        entries = result["entries"]
+        if len(entries) > 200:
+            result["entries"] = entries[:200]
+            result["truncated"] = True
+            result["total_entries"] = len(entries)
+
+    # Bound search results
+    if "matches" in result and isinstance(result["matches"], list):
+        matches = result["matches"]
+        if len(matches) > 100:
+            result["matches"] = matches[:100]
+            result["truncated"] = True
+            result["total_matches"] = len(matches)
+
+    return result
+
 
 class ToolRegistry:
+    """
+    Central registry and execution gateway for all JARVIS capability tools.
+
+    Responsibilities:
+    1. Tool registration and lookup
+    2. Permission enforcement (via ToolContext + optional PermissionEngine)
+    3. Schema validation
+    4. Safe tool execution with bounded LLM-facing results
+    5. Structured error returns for all failure modes
+    """
+
     def __init__(self):
         self._tools: Dict[str, Tool] = {}
 
@@ -36,7 +119,7 @@ class ToolRegistry:
     ) -> List[Dict[str, Any]]:
         """
         Returns JSON-serializable tool definitions for LLM function calling.
-        Supports optional filtering by specific tool names or category prefixes.
+        Includes name, description, parameters, required_permissions, and risk.
         """
         effective_names = tool_names or names
         tools = list(self._tools.values())
@@ -45,8 +128,12 @@ class ToolRegistry:
             tools = [t for t in tools if t.name in name_set]
         if categories is not None:
             cat_set = set(categories)
-            tools = [t for t in tools if getattr(t, "category", None) in cat_set or getattr(t, "required_permission", "").split(".")[0] in cat_set]
-        
+            tools = [
+                t for t in tools
+                if getattr(t, "category", None) in cat_set
+                or (t.required_permissions and t.required_permissions[0].split(".")[0] in cat_set)
+            ]
+
         if as_openai:
             return [
                 {
@@ -70,9 +157,7 @@ class ToolRegistry:
         if not params:
             return None
 
-        # Check required fields if defined in JSON schema format
         required = params.get("required", [])
-        properties = params.get("properties", {})
 
         for req_field in required:
             if req_field not in arguments:
@@ -81,9 +166,9 @@ class ToolRegistry:
                     "message": f"Tool '{tool.name}' requires argument '{req_field}'"
                 }
 
-        # Check legacy parameter dict format (e.g. {"path": "string (required)"})
+        # Legacy format support
         for param_name, param_spec in params.items():
-            if param_name in ["type", "properties", "required"]:
+            if param_name in ("type", "properties", "required"):
                 continue
             if isinstance(param_spec, str) and "required" in param_spec.lower():
                 if param_name not in arguments or arguments[param_name] is None:
@@ -98,10 +183,18 @@ class ToolRegistry:
         self,
         tool_name: str,
         arguments: Optional[Dict[str, Any]] = None,
-        context: Optional[ToolContext] = None
+        context: Optional[ToolContext] = None,
     ) -> ToolResult:
         """
-        Executes a registered tool with schema and permission validation.
+        Execute a registered tool through the full security gateway.
+
+        Pipeline:
+        1. Argument type validation
+        2. Tool lookup
+        3. Permission enforcement
+        4. Schema validation
+        5. Tool execution
+        6. Bounded LLM result application
         """
         if arguments is None:
             arguments = {}
@@ -127,22 +220,33 @@ class ToolRegistry:
                 }
             )
 
-        # 1. Permission Enforcement
+        # 1. Permission enforcement
         ctx = context or ToolContext()
         for required_perm in tool.required_permissions:
             if not ctx.has_permission(required_perm):
+                # Build permission_required response with full metadata
+                tool_risk = getattr(tool, "risk", "medium")
+                import uuid as _uuid
+                request_id = f"perm_{_uuid.uuid4().hex[:12]}"
                 return ToolResult(
                     success=False,
                     tool=tool_name,
-                    status="permission_denied",
+                    status="permission_required",
                     error={
-                        "code": "PERMISSION_DENIED",
-                        "message": f"Execution of '{tool_name}' requires permission '{required_perm}'",
-                        "required_permission": required_perm
+                        "code": "PERMISSION_REQUIRED",
+                        "message": f"Tool '{tool_name}' requires permission '{required_perm}'",
+                    },
+                    metadata={
+                        "request_id": request_id,
+                        "permission": required_perm,
+                        "summary": f"Execute '{tool_name}' — requires {required_perm}",
+                        "risk": tool_risk,
+                        "run_id": ctx.run_id,
+                        "session_id": ctx.session_id,
                     }
                 )
 
-        # 2. Schema Validation
+        # 2. Schema validation
         schema_err = self.validate_schema(tool, arguments)
         if schema_err:
             return ToolResult(
@@ -152,9 +256,9 @@ class ToolRegistry:
                 error=schema_err
             )
 
-        # 3. Tool Execution
+        # 3. Tool execution
         try:
-            return tool.execute(arguments, ctx)
+            result = tool.execute(arguments, ctx)
         except Exception as e:
             logger.exception(f"Unexpected error executing tool '{tool_name}': {e}")
             return ToolResult(
@@ -165,6 +269,14 @@ class ToolRegistry:
                     "message": str(e)
                 }
             )
+
+        # 4. Apply bounded LLM-facing result limits
+        if result.result is not None:
+            result.result = _apply_llm_bounds(result.result)
+        if result.data is not None and result.data is not result.result:
+            result.data = result.result  # keep in sync after bounding
+
+        return result
 
 
 _global_tool_registry = ToolRegistry()

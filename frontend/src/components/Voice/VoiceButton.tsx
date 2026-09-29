@@ -28,7 +28,7 @@ const BARS = 5;
 const LABEL: Record<MicState, string> = {
   unsupported: "Voice unavailable",
   denied: "Mic blocked",
-  idle: "Hold to talk",
+  idle: "Click to talk",
   listening: "Listening...",
   transcribing: "Transcribing...",
   speaking: "JARVIS speaking",
@@ -52,19 +52,18 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
   const active = state === "listening";
   const busy = state === "transcribing";
 
-  const begin = useCallback(() => {
+  const toggle = useCallback(() => {
     if (disabled || busy) return;
-    holdRef.current = true;
-    setHeld(true);
-    onStart();
-  }, [disabled, busy, onStart]);
-
-  const end = useCallback(() => {
-    if (!holdRef.current) return;
-    holdRef.current = false;
-    setHeld(false);
-    onStop();
-  }, [onStop]);
+    if (active) {
+      setHeld(false);
+      holdRef.current = false;
+      onStop();
+    } else {
+      holdRef.current = true;
+      setHeld(true);
+      onStart();
+    }
+  }, [disabled, busy, active, onStart, onStop]);
 
   // Space is push-to-talk, unless the user is typing.
   useEffect(() => {
@@ -83,12 +82,20 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
     const down = (e: KeyboardEvent) => {
       if (e.code !== "Space" || e.repeat || isTyping(e.target)) return;
       e.preventDefault();
-      begin();
+      if (!holdRef.current) {
+        holdRef.current = true;
+        setHeld(true);
+        onStart();
+      }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code !== "Space" || isTyping(e.target)) return;
       e.preventDefault();
-      end();
+      if (holdRef.current) {
+        holdRef.current = false;
+        setHeld(false);
+        onStop();
+      }
     };
 
     window.addEventListener("keydown", down);
@@ -97,7 +104,7 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [begin, end, disabled]);
+  }, [onStart, onStop, disabled]);
 
   const normalized = Math.min(1, level / 0.08);
 
@@ -107,20 +114,13 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
         <button
           type="button"
           disabled={disabled || busy}
-          onMouseDown={begin}
-          onMouseUp={end}
-          onMouseLeave={end}
-          onTouchStart={(e) => {
+          onClick={(e) => {
             e.preventDefault();
-            begin();
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            end();
+            toggle();
           }}
           aria-label={LABEL[state]}
           aria-pressed={active}
-          title={disabled ? "Voice unavailable - use the text box" : "Hold to talk (or hold Space)"}
+          title={disabled ? "Voice unavailable - use the text box" : "Click to talk (or hold Space)"}
           className={[
             "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
             disabled
@@ -166,7 +166,7 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
             active ? "text-red-400" : busy ? "text-amber-400" : "text-neutral-500"
           }`}
         >
-          {held ? "Release to send" : LABEL[state]}
+          {active ? "Click to stop" : LABEL[state]}
         </span>
       </div>
 

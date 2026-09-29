@@ -1,2 +1,2 @@
-export * from './ArtifactCard';
-export * from './ArtifactViewerModal';
+export { default as ArtifactCard } from "./ArtifactCard";
+export { default } from "./ArtifactCard";
