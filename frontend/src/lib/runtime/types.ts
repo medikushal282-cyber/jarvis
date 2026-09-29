@@ -194,6 +194,25 @@ export interface Transcript {
   message?: string;
 }
 
+// --- workers ----------------------------------------------------------------
+
+/** HEALTHY and READY both mean "usable"; the UI shows both as READY. */
+export type WorkerStatus = "HEALTHY" | "READY" | "COOLDOWN" | "DISABLED" | "ERROR";
+
+export interface WorkerSummary {
+  worker_id: string;
+  provider: string;
+  model: string;
+  display_name?: string;
+  enabled?: boolean;
+  priority?: number;
+  status: WorkerStatus | string;
+  cooldown_remaining?: number;
+  /** Last four characters only; the full key never reaches the browser. */
+  api_key_hint?: string;
+  last_error_hint?: string | null;
+}
+
 export type ConnectionState =
   | "idle"
   | "connecting"

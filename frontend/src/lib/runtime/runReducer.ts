@@ -186,6 +186,21 @@ function doneLabel(label: string): string {
   return label;
 }
 
+/** `to_worker` per the contract, or the name in the gateway's message. */
+function workerName(d: Record<string, any>): string | null {
+  if (d.to_worker) return String(d.to_worker);
+  const match = /worker to (.+?)\.*\s*$/i.exec(String(d.message ?? ""));
+  return match ? match[1].trim() : null;
+}
+
+function reasonText(reason: string): string {
+  const r = reason.toLowerCase();
+  if (r.includes("rate")) return "Rate limited";
+  if (r.includes("timeout")) return "Timed out";
+  if (r.includes("fail") || r.includes("error")) return "Worker failed";
+  return reason;
+}
+
 function errorText(err: unknown): string {
   if (!err) return "";
   if (typeof err === "string") return err;
@@ -703,22 +718,35 @@ function applyEvent(state: RunView, envelope: RuntimeEvent): RunView {
     }
 
     // --- workers -------------------------------------------------------------------------
-    case "worker_switching": {
-      const to = d.to_worker ? String(d.to_worker) : null;
+    case "worker_cooldown":
+    case "worker_failed":
+      // Remembered as the reason for the switch that follows.
       return {
         ...s,
         worker: {
-          current: to,
-          previous: d.from_worker ? String(d.from_worker) : s.worker.current,
-          reason: d.reason ? String(d.reason) : null,
-          switches: s.worker.switches + 1,
+          ...s.worker,
+          reason: String(d.reason ?? (event === "worker_cooldown" ? "rate_limit" : "failed")),
         },
+      };
+
+    case "worker_switching": {
+      const to = workerName(d);
+      const from = d.from_worker ? String(d.from_worker) : s.worker.current;
+      // The current gateway announces its worker before every LLM call.
+      // Only a change of worker is a switch worth showing.
+      if (!to || !from || to === from) {
+        return { ...s, worker: { ...s.worker, current: to ?? s.worker.current } };
+      }
+      const reason = d.reason ? String(d.reason) : s.worker.reason;
+      return {
+        ...s,
+        worker: { current: to, previous: from, reason, switches: s.worker.switches + 1 },
         steps: addStep(s.steps, {
           id: `worker_${seq}`,
           kind: "worker",
           label: "Switching worker… continuing",
           status: "done",
-          detail: to ? `Now on ${to}` : undefined,
+          detail: `${reason ? `${reasonText(reason)} — now` : "Now"} on ${to}`,
         }),
       };
     }

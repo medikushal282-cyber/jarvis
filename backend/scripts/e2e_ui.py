@@ -9,11 +9,8 @@ backend's port, so your own backend on :8006 can keep running.
 
 Usage (from backend/):
 
-    # 1. an isolated scripted backend
-    set JARVIS_AGENT=scripted
-    set JARVIS_SCRIPTED_DELAY_MS=150
-    set JARVIS_SANDBOX_ROOT=%TEMP%\\jarvis_e2e_sandbox
-    .venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8016
+    # 1. an isolated scripted backend (temp sandbox, temp worker pool)
+    .venv\\Scripts\\python.exe scripts\\e2e_backend.py
 
     # 2. the frontend dev server on :3000 (npm run dev), then:
     .venv\\Scripts\\python.exe scripts\\e2e_ui.py [--out DIR]
@@ -69,6 +66,7 @@ def main() -> int:
         page = ctx.new_page()
         page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: console_errors.append(f"pageerror: {e}"))
+        page.on("dialog", lambda d: d.accept())
 
         page.goto(FRONTEND, wait_until="networkidle")
         page.wait_for_timeout(1500)
@@ -119,6 +117,39 @@ def main() -> int:
         check("history restored after reload",
               "What is 2 + 2?" in body and "Create an ecommerce website" in body)
         check("past run keeps its artifact", page.get_by_role("button", name="index.html").count() > 0)
+
+        # Workers panel: add, test, pause, reorder, remove. Keys never shown.
+        key = "gsk_" + "e2e" * 12 + "WXYZ"
+        panel = page.locator("div.w-96")
+        page.get_by_role("button", name="WORKERS").click()
+        page.get_by_text("No workers yet").wait_for(timeout=10000)
+        check("worker panel opens on an empty pool", True)
+        page.get_by_role("button", name="+ Add Worker").click()
+        page.get_by_placeholder("Stored on this machine only").fill(key)
+        page.get_by_role("button", name="Test connection").click()
+        page.wait_for_function("() => !document.body.innerText.includes('Testing…')", timeout=30000)
+        text = panel.inner_text()
+        check("connection test shows a plain reason",
+              any(m in text for m in ("API key was rejected", "Couldn't reach", "Connection successful",
+                                      "provider returned an error", "Rate limited", "didn't answer")),
+              text[-160:])
+        check("the key is never shown back", key not in page.inner_text("body"))
+        page.get_by_role("button", name="Save worker").click()
+        page.get_by_text("KEY ...WXYZ").wait_for(timeout=10000)
+        page.screenshot(path=str(out / "5_workers.png"))
+        check("saved worker shows READY with a key hint only",
+              "READY" in panel.inner_text() and key not in page.inner_text("body"))
+        page.get_by_role("button", name="PAUSE").click()
+        page.get_by_text("DISABLED", exact=True).wait_for(timeout=10000)
+        page.get_by_role("button", name="ENABLE").click()
+        page.get_by_text("READY", exact=True).wait_for(timeout=10000)
+        check("pause and enable work", True)
+        page.get_by_role("button", name="Raise priority").click()
+        page.wait_for_timeout(800)
+        check("priority can be raised", "11" in panel.inner_text())
+        page.get_by_role("button", name="REMOVE").click()
+        page.get_by_text("No workers yet").wait_for(timeout=10000)
+        check("worker can be removed", True)
 
         browser.close()
 

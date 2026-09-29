@@ -216,6 +216,34 @@ describe("events shaped the way the current brain sends them", () => {
   });
 });
 
+describe("workers, as the current gateway reports them", () => {
+  const announce = (w: string) =>
+    ev("worker_switching", { message: `Switching execution worker to ${w}...` });
+
+  it("does not call every LLM turn a switch", () => {
+    seq = 0;
+    const view = play(ev("run_started"), announce("groq (llama-3.1-8b-instant)"), ev("worker_connected"),
+      announce("groq (llama-3.1-8b-instant)"), ev("worker_connected"));
+    expect(view.steps.some((s) => s.kind === "worker")).toBe(false);
+    expect(view.worker.current).toBe("groq (llama-3.1-8b-instant)");
+    expect(view.worker.switches).toBe(0);
+  });
+
+  it("shows a real switch, with the reason from the cooldown before it", () => {
+    seq = 0;
+    const view = play(
+      ev("run_started"),
+      announce("groq (llama-3.1-8b-instant)"),
+      ev("worker_cooldown", { worker_id: "w1", reason: "rate_limit", cooldown_s: 20 }),
+      announce("openai (gpt-4o-mini)"),
+    );
+    const step = view.steps.find((s) => s.kind === "worker")!;
+    expect(step.label).toBe("Switching worker… continuing");
+    expect(step.detail).toBe("Rate limited — now on openai (gpt-4o-mini)");
+    expect(view.worker).toMatchObject({ current: "openai (gpt-4o-mini)", previous: "groq (llama-3.1-8b-instant)", switches: 1 });
+  });
+});
+
 describe("artifacts from the final result", () => {
   it("merge with announced ones without duplicates", () => {
     seq = 0;

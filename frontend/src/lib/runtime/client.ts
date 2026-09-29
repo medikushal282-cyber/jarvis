@@ -14,6 +14,7 @@ import type {
   SessionSummary,
   Transcript,
   VoiceConfig,
+  WorkerSummary,
 } from "./types";
 
 export const API_BASE =
@@ -242,5 +243,32 @@ export const voice = {
     }),
 };
 
-export const runtimeClient = { workspaces, sessions, runs, voice, API_BASE };
+// --- workers ----------------------------------------------------------------
+
+export const workers = {
+  list: () => request<WorkerSummary[]>("/api/workers"),
+
+  create: (body: { provider: string; model: string; api_key: string; priority?: number; display_name?: string }) =>
+    request<WorkerSummary>("/api/workers", { method: "POST", body: JSON.stringify(body) }),
+
+  update: (
+    id: string,
+    body: { enabled?: boolean; priority?: number; reset_cooldown?: boolean; api_key?: string; display_name?: string },
+  ) =>
+    request<WorkerSummary>(`/api/workers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  remove: (id: string) =>
+    request<{ success: boolean }>(`/api/workers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  test: (body: { provider: string; model: string; api_key: string }) =>
+    request<{ success: boolean; message: string }>("/api/workers/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
+
+export const runtimeClient = { workspaces, sessions, runs, voice, workers, API_BASE };
 export default runtimeClient;

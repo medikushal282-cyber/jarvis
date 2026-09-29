@@ -78,6 +78,11 @@ APPROVAL_REJECTED = PERMISSION_DENIED
 
 #: Nikunj's worker gateway moved the run to another LLM worker. Same run.
 WORKER_SWITCHING = "worker_switching"
+#: Gateway detail events, as the current gateway emits them. The UI uses
+#: cooldown/failed as the reason for the next switch and ignores connected.
+WORKER_CONNECTED = "worker_connected"
+WORKER_COOLDOWN = "worker_cooldown"
+WORKER_FAILED = "worker_failed"
 #: A produced file/preview is ready to show. Payload follows the public
 #: artifact contract (docs/INTERFACES.md section 3.6) -- never a filesystem path.
 ARTIFACT_CREATED = "artifact_created"
@@ -181,7 +186,8 @@ KNOWN_EVENTS: FrozenSet[str] = frozenset(
         MEMORY_RECALLED, MEMORY_APPLIED, MEMORY_RECORDED,
         VERIFICATION_STARTED, VERIFICATION_COMPLETED,
         PERMISSION_REQUIRED, PERMISSION_GRANTED, PERMISSION_DENIED,
-        WORKER_SWITCHING, ARTIFACT_CREATED,
+        WORKER_SWITCHING, WORKER_CONNECTED, WORKER_COOLDOWN, WORKER_FAILED,
+        ARTIFACT_CREATED,
         STREAM_READY, HEARTBEAT, VOICE_TRANSCRIBED, VOICE_SPOKEN,
     }
     | LEGACY_EVENTS

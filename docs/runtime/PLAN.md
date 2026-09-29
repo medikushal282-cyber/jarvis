@@ -26,7 +26,7 @@ back to `core` needs no UI change.
 | 0 | Safety and shared contracts | **Done** |
 | 1 | One event flow in the frontend | **Done** |
 | 2 | Permissions and Turbo | Next — needs 3.5 sign-off from Nikunj and Lohit |
-| 3 | Worker panel and switching | |
+| 3 | Worker panel and switching | **Done** |
 | 4 | Artifacts and preview | |
 | 5 | Voice end to end | |
 | 6 | Acceptance tests | |
@@ -78,7 +78,16 @@ listed for Nikunj in INTERFACES.md section 6.
   approve actions covered by your permissions".
 - Scripted "permission" scenario; tests for allow, deny, timeout and Turbo.
 
-## Phase 3 — Workers
+## Phase 3 — Workers (done)
+
+Shipped: the worker panel shows READY / COOLDOWN (with countdown) /
+DISABLED, and can add, test, pause, reorder, reset and remove workers; the
+badge reflects pool health. The test endpoint passes the key to the call
+instead of the process environment and returns a plain reason, never the
+raw provider error. Inputs are validated. The UI shows a worker switch only
+when the worker actually changes (the gateway announces one before every
+call). 9 API tests; `scripts/e2e_ui.py` now covers the panel (25 checks),
+run through `scripts/e2e_backend.py`, which isolates the worker file.
 
 - Check `WorkerPoolControl` against the brief: provider, model, key hint only,
   priority, enabled, test connection.
