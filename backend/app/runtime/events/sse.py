@@ -31,11 +31,10 @@ SSE_HEADERS = {
 def frame(envelope: dict) -> str:
     """Render one event as an SSE frame."""
     seq = envelope.get("seq", 0)
-    name = envelope.get("event", "message")
     body = json.dumps(envelope, default=str)
     if seq:
-        return f"id: {seq}\nevent: {name}\ndata: {body}\n\n"
-    return f"event: {name}\ndata: {body}\n\n"
+        return f"id: {seq}\ndata: {body}\n\n"
+    return f"data: {body}\n\n"
 
 
 def resolve_from_seq(request: Request, explicit: Optional[int] = None) -> int:

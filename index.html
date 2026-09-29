@@ -1,103 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>frAIday Autonomous Web App</title>
-    <style>
-        :root {
-            --bg: #F5F2EA;
-            --black: #0A0A0A;
-            --yellow: #FFE600;
-            --green: #22C55E;
-            --card: #FFFFFF;
-            --accent: #FF6B6B;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif; }
-        body { background: var(--bg); color: var(--black); min-height: 100vh; padding: 2rem; display: flex; flex-direction: column; align-items: center; }
-        .container { background: var(--card); border: 3px solid var(--black); box-shadow: 6px 6px 0px var(--black); max-width: 720px; width: 100%; padding: 2rem; border-radius: 4px; }
-        .tag { display: inline-block; background: var(--yellow); border: 2px solid var(--black); padding: 4px 10px; font-weight: 800; font-size: 11px; text-transform: uppercase; margin-bottom: 1rem; }
-        h1 { font-size: 2.4rem; font-weight: 900; line-height: 1.1; margin-bottom: .75rem; letter-spacing: -0.03em; }
-        h2 { font-size: 1.8rem; margin-top: 2rem; margin-bottom: .5rem; }
-        p { color: #333; font-size: 14px; line-height: 1.6; margin-bottom: 1.5rem; }
-        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 1.5rem; }
-        .btn { border: 2px solid var(--black); padding: 10px 18px; font-weight: 800; font-size: 13px; cursor: pointer; transition: all .15s ease; box-shadow: 3px 3px 0px var(--black); text-decoration: none; display: inline-flex; align-items: center; }
-        .btn-primary { background: var(--yellow); color: var(--black); }
-        .btn-primary:hover { background: var(--black); color: var(--yellow); transform: translate(-1px, -1px); box-shadow: 4px 4px 0px var(--black); }
-        .btn-secondary { background: white; color: var(--black); }
-        .btn-secondary:hover { background: #f0f0f0; }
-        .btn-accent { background: var(--accent); color: white; }
-        .btn-accent:hover { background: var(--black); color: var(--accent); }
-        .stats-box { margin-top: 1.5rem; padding: 1rem; border: 2px solid var(--black); background: #fafafa; display: flex; align-items: center; justify-content: space-between; }
-        .status-pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 8px; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.4; transform:scale(.85); } }
-        form { display: flex; flex-direction: column; gap: .75rem; }
-        input, textarea { padding: .5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-        input:focus, textarea:focus { outline: none; border-color: var(--black); }
-        footer { margin-top: 2rem; font-size: 12px; text-align: center; color: #555; }
-    </style>
+    <title>Charlie Kirk Biography</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <div class="tag">frAIday Agentic Web</div>
-        <h1>Live Autonomous Website</h1>
-        <p>This web application was generated and compiled autonomously in your workspace. Live‑reload sync is active: any agent updates reflect here automatically.</p>
-
-        <div class="stats-box">
-            <span style="font-size: 12px; font-weight: 700; font-family: monospace;"><span class="status-pulse"></span>LIVE PREVIEW ACTIVE</span>
-            <span id="counterDisplay" style="font-weight: 900; font-size: 18px; font-family: monospace;">0 Interactions</span>
-        </div>
-
-        <div class="btn-group">
-            <button class="btn btn-primary" onclick="handleAction()">Execute Action +1</button>
-            <button class="btn btn-secondary" onclick="alert('Autonomous agent verified in live browser!')">Verify Runtime</button>
-            <button class="btn btn-accent" onclick="toggleSection()">Show Contact Form</button>
-        </div>
-
-        <section id="about" style="margin-top:2rem;">
-            <h2>About This Project</h2>
-            <p>Powered by an autonomous AI agent, this page demonstrates real‑time updates, interactive counters, and a simple contact form that can be expanded further.</p>
+    <header>
+        <h1>Charlie Kirk</h1>
+    </header>
+    <main>
+        <section class="bio">
+            <p>Charlie Kirk (born 1993) is an American conservative activist and the founder of Turning Point USA, a nonprofit organization that promotes free-market principles and limited government among college students. He also founded the media outlet Turning Point News and the political action committee Turning Point Action. Kirk graduated from the University of Missouri–Kansas City with a degree in political science and has become a prominent speaker and author, known for his advocacy of conservative policies and youth engagement in politics.</p>
         </section>
-
-        <section id="contact" style="display:none; margin-top:2rem;">
-            <h2>Contact Us</h2>
-            <form onsubmit="handleContact(event)">
-                <input type="text" name="name" placeholder="Your name" required>
-                <input type="email" name="email" placeholder="Your email" required>
-                <textarea name="message" rows="4" placeholder="Your message" required></textarea>
-                <button type="submit" class="btn btn-primary">Send Message</button>
-            </form>
-        </section>
-
-        <footer>
-            &copy; 2026 frAIday Autonomous Web App. All rights reserved.
-        </footer>
-    </div>
-
-    <script>
-        let clicks = 0;
-        function handleAction() {
-            clicks++;
-            document.getElementById('counterDisplay').innerText = clicks + (clicks === 1 ? ' Interaction' : ' Interactions');
-        }
-
-        function toggleSection() {
-            const contact = document.getElementById('contact');
-            contact.style.display = contact.style.display === 'none' ? 'block' : 'none';
-        }
-
-        function handleContact(e) {
-            e.preventDefault();
-            const form = e.target;
-            const data = {
-                name: form.name.value,
-                email: form.email.value,
-                message: form.message.value
-            };
-            alert(`Thank you, ${data.name}! Your message has been received.`);
-            form.reset();
-            // In a real app you would POST this data to a server.
-        }
-    </script>
+    </main>
+    <footer>
+        <p>© 2024 Charlie Kirk Biography</p>
+    </footer>
 </body>
 </html>

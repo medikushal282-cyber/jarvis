@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import time
+import os
 from typing import Any, Dict, List, Optional, Set
 
 from app.agent.prompts import build_system_prompt, build_user_prompt
@@ -101,18 +102,39 @@ async def run_agent_loop(
 
         # Call LLM via Router
         try:
-            # We flatten messages into a compact conversational prompt if provider is basic
-            current_user_content = messages[-1]["content"] if messages and messages[-1]["role"] == "user" else "Continue with next step or summarize results."
+            # Phase 1 context budgeting
+            max_tokens = int(os.environ.get("JARVIS_MAX_AGENT_CONTEXT_TOKENS", "5500"))
+            char_budget = max_tokens * 4
             
-            # Format history for multi-turn awareness
+            current_user_content = messages[-1]["content"] if messages and messages[-1]["role"] == "user" else "Continue with next step or summarize results."
+            if len(current_user_content) > char_budget:
+                current_user_content = current_user_content[:char_budget - 200] + "\n...[TRUNCATED TO FIT BUDGET]"
+                
+            budget_remaining = char_budget - len(current_user_content)
+            
             history_context = ""
-            if len(messages) > 1:
+            if len(messages) > 1 and budget_remaining > 500:
+                orig_obj = messages[0].get("content", "")[:1000]
+                budget_remaining -= len(orig_obj)
+                
+                middle_messages = messages[1:-1]
                 hist_lines = []
-                for m in messages[:-1]:
+                for m in reversed(middle_messages):
                     r = m.get("role", "system").upper()
-                    c = (m.get("content") or "")[:400].replace("\n", " ")
-                    hist_lines.append(f"[{r}]: {c}")
-                history_context = "\n### Turn History:\n" + "\n".join(hist_lines) + "\n"
+                    c = m.get("content") or ""
+                    if len(c) > 600:
+                        c = c[:600].replace("\n", " ") + "...[TRUNC]"
+                    else:
+                        c = c.replace("\n", " ")
+                    line = f"[{r}]: {c}"
+                    if len(line) < budget_remaining:
+                        hist_lines.insert(0, line)
+                        budget_remaining -= len(line)
+                    else:
+                        hist_lines.insert(0, "...[OLDER HISTORY REMOVED]")
+                        break
+                        
+                history_context = f"\n### Original Objective:\n{orig_obj}\n\n### Turn History:\n" + "\n".join(hist_lines) + "\n"
 
             combined_user_prompt = current_user_content
             if history_context and history_context not in combined_user_prompt:
@@ -125,6 +147,7 @@ async def run_agent_loop(
                 model=model,
                 provider=provider,
                 tools=tool_defs,
+                emit=emit,
             )
         except Exception as exc:
             logger.exception("LLM call failed in turn %d: %s", turn_idx, exc)
@@ -275,23 +298,36 @@ def _format_tool_result_for_llm(tool_name: str, res: ToolResult) -> str:
         code = data.get("exit_code", 0)
         out = f"Exit code: {code}"
         if stdout:
-            out += f"\nstdout: {stdout[:1500]}"
+            if len(stdout) > 1500:
+                out += f"\nstdout ({len(stdout)} chars, truncated): {stdout[:1500]}\n...[STDOUT TRUNCATED]"
+            else:
+                out += f"\nstdout: {stdout}"
         if stderr:
-            out += f"\nstderr: {stderr[:1000]}"
+            if len(stderr) > 1000:
+                out += f"\nstderr ({len(stderr)} chars, truncated): {stderr[:1000]}\n...[STDERR TRUNCATED]"
+            else:
+                out += f"\nstderr: {stderr}"
         return out
 
     if tool_name == "read_file":
         content = data.get("content", "")
-        return f"Content of {data.get('path')}:\n{content[:2000]}"
+        if len(content) > 2000:
+            return f"Content of {data.get('path')} (File contains {len(content)} characters. Relevant output truncated...):\n{content[:2000]}\n...[FILE CONTENT TRUNCATED]"
+        return f"Content of {data.get('path')}:\n{content}"
 
     if tool_name in ("create_file", "write_file", "update_file"):
         return f"File `{data.get('path')}` saved successfully ({data.get('bytes', 0)} bytes, {data.get('lines', 0)} lines)."
 
     if tool_name == "list_directory":
         entries = [e.get("name") for e in data.get("entries", [])]
-        return f"Directory contents of `{data.get('path', '.')}`: {json.dumps(entries[:30])}"
+        if len(entries) > 40:
+            return f"Directory contains {len(entries)} entries. Showing limited entries:\n{json.dumps(entries[:40])}"
+        return f"Directory contents of `{data.get('path', '.')}`: {json.dumps(entries)}"
 
-    return json.dumps(data)[:1500]
+    raw = json.dumps(data)
+    if len(raw) > 1500:
+        return f"Result ({len(raw)} chars, truncated):\n{raw[:1500]}\n...[RESULT TRUNCATED]"
+    return raw
 
 
 def _emit_tool_specific_events(
