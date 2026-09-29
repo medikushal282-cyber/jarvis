@@ -1,3 +1,18 @@
+# =============================================================================
+# RETIRED — legacy reference only (branch agent/core, 2026-09-29)
+#
+# This file contains the old multi-agent DAG pipeline:
+#   Orchestrator -> Researcher -> Executor -> Validator -> Recovery
+#
+# It is NO LONGER called by any active API route. The canonical execution
+# path is:
+#   JarvisBrain.run(request, emit) -> run_agent(request, emit, memory_ctx)
+#   File: backend/app/agent/brain.py + backend/app/agent/loop.py
+#
+# This file is kept as a reference implementation only. Do not add new
+# callers. See docs/agent/AUDIT.md §4 for the full retirement decision.
+# =============================================================================
+
 import os
 import re
 import time
