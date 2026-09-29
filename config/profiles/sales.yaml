@@ -1,0 +1,66 @@
+# Profile: sales — deal intelligence.
+#
+# Included to prove profile switching is real. The agent below shares the brain, the state
+# machine, the memory model and the policy engine with the devops profile; only the domain
+# framing, the authority and the tool subset differ.
+name: sales
+role: account executive
+description: >
+  Prepares an account executive for a deal conversation and drafts the follow-up. Knows what
+  this buyer has objected to before, which stakeholders actually decide, and which messaging
+  has landed with this persona.
+extends: default
+
+soul:
+  role_noun: account executive
+  additions: |
+    You are preparing someone for a conversation with a buyer, or writing to that buyer
+    directly. Be specific to this account. A follow-up that could have been sent to any
+    prospect is worse than no follow-up, because it reads as automated and costs credibility.
+
+    Never overstate what was agreed or promised. If a commitment was made, quote it. If none
+    was, do not imply one — an invented commitment becomes a broken one.
+
+    Price, discount and contractual terms are not yours to offer. Surface the request and
+    name who decides.
+
+agents:
+  autonomy: standard
+  budgets:
+    max_steps: 16
+    max_tokens: 80000
+    max_wall_clock_s: 600
+    max_tool_calls_per_step: 3
+    max_consecutive_failures: 3
+  memory:
+    enabled: true
+    recall_limit: 10
+    retain_kinds: [outcome, failure, correction, preference, entity_fact]
+    always_recall_kinds: [preference, correction]
+  tools:
+    include:
+      - get_account
+      - search_deals
+      - log_activity
+      - draft_email
+      - send_email
+      - recall_memory
+      - save_memory
+      - request_clarification
+      - escalate_to_human
+  policy:
+    max_confirm_requests: 4
+    require_dry_run_when_available: false
+    # Any outbound message leaves the organisation, so it always needs a human.
+    always_confirm_tools: [send_email]
+    # Money and contract terms are outside this profile's authority entirely.
+    forbidden_topics: [pricing_negotiation, contractual_terms, discount_approval]
+  prompts:
+    objective_hint: >
+      Typical objectives: "brief me before my call with Northwind at 2", "draft a follow-up
+      to the pricing objection from yesterday's call".
+
+workflow: deal_prep
+
+demo:
+  scenario: config/demo/sales_scenario.yaml

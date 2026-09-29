@@ -1,0 +1,177 @@
+# Tool registry — remediation (the mutating half).
+#
+# This file is where the permission model earns its keep. Read-only investigation is
+# `auto`; anything that changes a running system is `confirm` and is marked with its real
+# blast radius; arbitrary code execution is `deny` and is off unless a profile or an
+# operator deliberately lifts it.
+#
+# `deny` is not a bug: it is the tier that proves the policy engine is load-bearing rather
+# than decorative. `run_diagnostic_command` would make every other guard pointless, so it
+# ships closed, and the reasoning for lifting it lives in config/agents.md.
+version: 1
+
+tools:
+  - name: restart_service
+    description: >
+      Perform a rolling restart of a service's replicas. This sheds in-flight requests on
+      each replica as it cycles, so it is disruptive: use it only when a stateless process
+      is wedged (leaked threads, stuck workers) and a deploy boundary is not implicated. If
+      the symptom started at a deploy, roll back instead — a restart will not undo a bad
+      release and will hide the evidence. Prefer the smallest replica count that restores
+      health, and verify with get_service_health afterwards.
+    provider: remediation
+    method: restart_service
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service to restart.
+        replicas:
+          type: string
+          enum: [one, half, all]
+          default: one
+          description: How much of the fleet to cycle. Defaults to the least disruptive option.
+        reason:
+          type: string
+          description: One sentence on what this is expected to fix. Recorded in the change log.
+        dry_run:
+          type: boolean
+          default: false
+          description: When true, returns the plan and expected impact without touching anything.
+      required: [service, reason]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 120
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: >
+      { action_id, service, replicas_cycled, started_at, completed_at, resulting_status,
+        requests_dropped_estimate }
+    redact: []
+
+  - name: rollback_deploy
+    description: >
+      Roll a service back to a previous known-good version. This is the correct first
+      response when a symptom's onset lines up with a deploy boundary — it directly undoes
+      the suspected change instead of masking it. Requires the target deploy id; take it
+      from get_recent_deploys. Rolling back a database migration is not covered by this tool
+      and must be escalated.
+    provider: remediation
+    method: rollback_deploy
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service to roll back.
+        to_deploy_id:
+          type: string
+          description: The deploy id to restore, from get_recent_deploys.
+        reason:
+          type: string
+          description: One sentence linking the onset evidence to this target version.
+        dry_run:
+          type: boolean
+          default: false
+          description: When true, returns the plan and expected impact without touching anything.
+      required: [service, to_deploy_id, reason]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 180
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: >
+      { action_id, service, from_version, to_version, started_at, completed_at,
+        resulting_status, schema_compatible: bool }
+    redact: []
+
+  - name: scale_replicas
+    description: >
+      Change the desired replica count for a service. Adding capacity relieves load-driven
+      saturation (queue depth, CPU, pool wait) but only masks a leak — if memory or
+      connections climb monotonically, scaling buys time and does not fix the cause, and you
+      should say so rather than presenting it as a resolution. Scaling down is disruptive
+      and is treated with the same care as a restart.
+    provider: remediation
+    method: scale_replicas
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service to scale.
+        replicas:
+          type: integer
+          minimum: 1
+          maximum: 200
+          description: Target desired replica count.
+        reason:
+          type: string
+          description: One sentence on what this is expected to relieve.
+        dry_run:
+          type: boolean
+          default: false
+          description: When true, returns the plan and expected impact without touching anything.
+      required: [service, replicas, reason]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 120
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 1.0
+      jitter: true
+      retry_on: [timeout, provider_5xx]
+    idempotent: true
+    side_effects: mutating
+    returns: >
+      { action_id, service, replicas_before, replicas_after, started_at, completed_at,
+        resulting_status }
+    redact: []
+
+  - name: run_diagnostic_command
+    description: >
+      Execute an arbitrary shell command against a service host. This is deliberately denied
+      by default: it would let a compromised or confused plan bypass every other guard in
+      this file, and it is not needed for the incident workflow, which has specific tools
+      for every read it performs. It exists in the registry so the policy engine has
+      something real to refuse, and so an operator who genuinely needs it can lift it
+      deliberately for one run rather than discovering there is no such lever.
+    provider: remediation
+    method: run_diagnostic_command
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Target service.
+        command:
+          type: string
+          description: The command to run.
+      required: [service, command]
+      additionalProperties: false
+    permission: deny
+    timeout_s: 60
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: "{ stdout, stderr, exit_code }"
+    redact: [stdout, stderr]

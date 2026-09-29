@@ -1,0 +1,408 @@
+# Tool registry — business profiles (sales and customer support).
+#
+# These exist so that profile switching is a real capability rather than a claim. The
+# flagship demo is the devops profile, but a Brain whose tool registry only ever describes
+# one vertical is not actually configurable, and the hackathon brief asks for presets.
+#
+# Both profiles lean on the same two facts: what the organisation already knows about this
+# counterparty, and what has been said to them before. Those live in the record (read via
+# the get_*/search_* tools) and in memory (recall_memory). Nothing here duplicates them.
+version: 1
+
+tools:
+  # ---------------------------------------------------------------- sales
+  - name: get_account
+    description: >
+      Load an account's profile: owner, segment, contract dates, products, and the
+      stakeholders with their roles. Call this before drafting anything for an account, so
+      the draft reflects who actually decides and who merely influences.
+    provider: crm
+    method: get_account
+    parameters:
+      type: object
+      properties:
+        account_id:
+          type: string
+          description: Account identifier, or the company name if the id is unknown.
+      required: [account_id]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { id, name, segment, owner, arr_usd, renewal_date, products: [], stakeholders:
+        [ { name, role, influence, last_contacted_at } ], health_score }
+    redact: [billing_contact_email, phone]
+
+  - name: search_deals
+    description: >
+      Search the pipeline for deals by account, stage or owner, returning stage, value,
+      close date and the last recorded activity. Use it to ground a recommendation in the
+      actual pipeline state instead of restating the request.
+    provider: crm
+    method: search_deals
+    parameters:
+      type: object
+      properties:
+        account_id:
+          type: string
+          description: Restrict to one account.
+        stage:
+          type: string
+          enum: [discovery, evaluation, proposal, negotiation, closed_won, closed_lost]
+          description: Restrict to one pipeline stage.
+        owner:
+          type: string
+          description: Restrict to one rep.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Maximum number of deals.
+      required: []
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { deals: [ { id, account_id, name, stage, amount_usd, close_date, owner,
+                   last_activity_at, competitors: [], objections: [] } ] }
+    redact: []
+
+  - name: log_activity
+    description: >
+      Record an interaction against a deal or account — a call, an email, a meeting — with
+      its outcome. Log this whenever an interaction happened outside the agent, so the next
+      run has an accurate picture.
+    provider: crm
+    method: log_activity
+    parameters:
+      type: object
+      properties:
+        deal_id:
+          type: string
+          description: Deal this activity belongs to.
+        kind:
+          type: string
+          enum: [call, email, meeting, note]
+          description: Type of interaction.
+        summary:
+          type: string
+          description: What happened and what was agreed, in two or three sentences.
+        outcome:
+          type: string
+          enum: [positive, neutral, negative, no_response]
+          description: How it landed.
+      required: [deal_id, kind, summary]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, provider_5xx]
+    idempotent: false
+    side_effects: mutating
+    returns: "{ activity_id, deal_id, logged_at }"
+    redact: []
+
+  - name: draft_email
+    description: >
+      Produce a draft message for a named recipient without sending it. Always prefer
+      drafting first so a human can review tone and accuracy. The draft should be specific
+      to this counterparty: reference what they actually raised, and do not reuse a generic
+      template.
+    provider: crm
+    method: draft_email
+    parameters:
+      type: object
+      properties:
+        to:
+          type: string
+          description: Recipient name or address.
+        subject:
+          type: string
+          description: Subject line.
+        body:
+          type: string
+          description: Message body, plain text.
+        deal_id:
+          type: string
+          description: Deal to attach the draft to, if any.
+      required: [to, subject, body]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: "{ draft_id, to, subject, body, created_at }"
+    redact: []
+
+  - name: send_email
+    description: >
+      Send a previously drafted message to an external recipient. This is irreversible and
+      leaves the organisation, so it is confirm-gated and should only be called after the
+      draft has been shown. Never send to more recipients than the draft named.
+    provider: crm
+    method: send_email
+    parameters:
+      type: object
+      properties:
+        draft_id:
+          type: string
+          description: The draft to send, from draft_email.
+        confirm_recipients:
+          type: array
+          items:
+            type: string
+          description: The recipient list being confirmed, echoed back so a mismatch is caught.
+      required: [draft_id, confirm_recipients]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 30
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: "{ message_id, sent_at, recipients }"
+    redact: []
+
+  # ---------------------------------------------------------------- support
+  - name: get_customer
+    description: >
+      Load a customer's profile: plan, tenure, entitlements, environment and open tickets.
+      Call this before responding to any support request so the answer respects their
+      entitlement and their history rather than treating the request in isolation.
+    provider: support
+    method: get_customer
+    parameters:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: Customer identifier, or company name if the id is unknown.
+      required: [customer_id]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { id, name, plan, tenure_months, entitlements: [], environment,
+        open_tickets: [ { id, subject, opened_at, status } ], sentiment_trend, csm }
+    redact: [contact_email, phone]
+
+  - name: search_tickets
+    description: >
+      Search tickets by customer, status, tag or free text, with resolution notes where
+      closed. Use it to check whether this has happened before and how it was handled.
+    provider: support
+    method: search_tickets
+    parameters:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: Restrict to one customer.
+        query:
+          type: string
+          description: Free-text match over subject and body.
+        status:
+          type: string
+          enum: [open, pending, resolved, closed]
+          description: Restrict to one status.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Maximum number of tickets, most recent first.
+      required: []
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { tickets: [ { id, customer_id, subject, status, priority, opened_at, resolved_at,
+                     tags: [], resolution_note, reopened_count } ] }
+    redact: []
+
+  - name: get_known_issues
+    description: >
+      List currently known issues with their workarounds and fix status. Check this before
+      proposing a novel explanation: if the symptom matches a known issue, the honest answer
+      is the known issue and its workaround, not a fresh diagnosis.
+    provider: support
+    method: get_known_issues
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Symptom or component to match against known issues.
+        include_fixed:
+          type: boolean
+          default: false
+          description: Include issues that already have a released fix.
+      required: []
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { issues: [ { id, title, symptoms, affected_versions, workaround, fix_version,
+                    status, updated_at } ] }
+    redact: []
+
+  - name: draft_reply
+    description: >
+      Produce a customer-facing reply draft without sending it. Match the customer's
+      demonstrated expertise: do not explain fundamentals to an engineer, and do not assume
+      fluency with a non-technical requester. Lead with the answer or the workaround, and
+      state plainly what is not yet known.
+    provider: support
+    method: draft_reply
+    parameters:
+      type: object
+      properties:
+        ticket_id:
+          type: string
+          description: Ticket being answered.
+        body:
+          type: string
+          description: Reply text, plain text.
+        next_step:
+          type: string
+          description: What happens next and when, so the customer is not left waiting silently.
+      required: [ticket_id, body]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: "{ draft_id, ticket_id, body, created_at }"
+    redact: []
+
+  - name: send_reply
+    description: >
+      Send a drafted reply to the customer. Irreversible and customer-visible, so it is
+      confirm-gated. Escalating tone or a frustrated customer is a reason to prefer a human
+      review over this tool.
+    provider: support
+    method: send_reply
+    parameters:
+      type: object
+      properties:
+        draft_id:
+          type: string
+          description: The draft to send, from draft_reply.
+        confirm_ticket:
+          type: string
+          description: The ticket id being confirmed, echoed back so a mismatch is caught.
+      required: [draft_id, confirm_ticket]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 30
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: "{ message_id, sent_at, ticket_id }"
+    redact: []
+
+  - name: issue_refund
+    description: >
+      Issue a refund or credit against a customer's account. This moves money and is
+      irreversible, so it is confirm-gated and capped by policy. Always state the amount and
+      the reason in the confirmation, and never exceed the entitlement the customer's plan
+      allows.
+    provider: support
+    method: issue_refund
+    parameters:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: Customer receiving the credit.
+        amount_usd:
+          type: number
+          minimum: 0
+          maximum: 5000
+          description: Amount to credit. Above the policy ceiling this must be escalated instead.
+        reason:
+          type: string
+          description: Customer-visible reason for the credit.
+        ticket_id:
+          type: string
+          description: Ticket this refund settles.
+      required: [customer_id, amount_usd, reason]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 30
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: false
+    side_effects: destructive
+    returns: "{ refund_id, customer_id, amount_usd, status, processed_at }"
+    redact: []

@@ -1,0 +1,92 @@
+# Profile: devops — the flagship.
+#
+# This is the profile the main demo runs. It bundles a soul fragment, the policy overrides
+# that matter for production incident work, and the tool subset an on-call responder needs.
+# Nothing here is code; a different team could rewrite this file and change the agent's
+# behaviour and authority without touching the brain.
+name: devops
+role: reliability engineer
+description: >
+  On-call incident response for a production estate. Diagnoses a reported symptom against
+  logs, metrics and deploy history, applies the least invasive remediation that resolves it,
+  verifies recovery, and carries forward what it learns so the next occurrence is faster.
+extends: default
+
+soul:
+  # Appended to config/soul.md, not a replacement. Identity and values are shared across
+  # profiles; only the domain framing changes.
+  role_noun: reliability engineer
+  additions: |
+    You are working on live production systems. The person reading your output is probably
+    also holding a pager, so lead with impact and current status, not with methodology.
+
+    A change boundary is the most common cause of a sharp onset. Before you theorise about
+    a novel failure mode, check whether the symptom began at a deploy, a config change, or a
+    scaling event — it usually did.
+
+    A restart that clears a symptom without explaining it has not resolved the incident. If
+    you restart something, say what you still do not know, and open a ticket for the cause.
+
+agents:
+  autonomy: standard
+  budgets:
+    max_steps: 24
+    max_tokens: 120000
+    max_wall_clock_s: 900
+    max_tool_calls_per_step: 3
+    max_consecutive_failures: 4
+  memory:
+    enabled: true
+    recall_limit: 8
+    retain_kinds: [outcome, failure, correction, preference, entity_fact]
+    # Incidents are high-consequence; a recalled fix that has failed before must be visible
+    # rather than merely absent.
+    always_recall_kinds: [failure, correction]
+  tools:
+    # Anything not listed is unavailable to this profile, regardless of what the registry
+    # holds. Availability is a profile decision; permission is a tool decision; both apply.
+    include:
+      - search_logs
+      - get_service_health
+      - fetch_metrics
+      - get_recent_deploys
+      - inspect_runtime
+      - fetch_runbook
+      - search_incident_history
+      - recall_memory
+      - save_memory
+      - restart_service
+      - rollback_deploy
+      - scale_replicas
+      - post_status_update
+      - open_ticket
+      - page_oncall
+      - request_clarification
+      - escalate_to_human
+    # `run_diagnostic_command` is absent on purpose. It is absent here rather than denied
+    # per-run because an on-call agent has no task that needs arbitrary execution, so the
+    # honest default is that it is not part of this profile's world.
+  policy:
+    # Confirm-tier calls allowed per run before the agent must escalate instead of asking
+    # again. Prevents an agent from grinding a human down with repeated requests.
+    max_confirm_requests: 6
+    # A confirm request whose blast radius is unbounded (no dry_run, no replica limit) must
+    # be escalated rather than confirmed, even if a human would say yes.
+    require_dry_run_when_available: true
+    paging_threshold:
+      # page_oncall is only justified at or above this customer-visible severity.
+      min_severity: major
+      min_duration_minutes: 10
+  prompts:
+    objective_hint: >
+      Typical objectives: "checkout-api is throwing 5xx, find out why and fix it if you can",
+      "users report slow search since this morning, resolve or escalate".
+
+# The devops profile uses the incident-response workflow in config/workflows/.
+workflow: incident_response
+
+# Demo-only metadata. Never read by the brain; it exists so the demo script and the trace
+# viewer can label runs consistently.
+demo:
+  scenario: config/demo/devops_scenario.yaml
+  fixture_runs: 20

@@ -1,0 +1,229 @@
+# Tool registry — observability providers.
+# Read-only investigation tools. Every one of these is safe to call without asking:
+# they observe the world and change nothing. `permission: auto` is therefore correct
+# for all of them, and the policy engine will let the planner fire them freely.
+#
+# `provider` names a capability in config/providers.yaml. The registry resolves
+# provider+method to a callable, so swapping the mock adapter for the real
+# observability backend is a one-line edit there, never an edit here.
+version: 1
+
+tools:
+  - name: search_logs
+    description: >
+      Search application logs for one service inside a time window. Use this to find the
+      concrete error signature, stack frames and first-occurrence timestamp behind a
+      symptom. Prefer a narrow `query` and a short window over pulling everything.
+    provider: observability
+    method: search_logs
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service name, e.g. "checkout-api". Must be one of the services returned by get_service_health.
+        query:
+          type: string
+          description: >
+            Case-insensitive substring or simple term to match against log messages,
+            e.g. "connection pool" or "TimeoutException". Omit to sample all levels.
+        window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          default: 60
+          description: How far back to search, in minutes, ending now.
+        min_level:
+          type: string
+          enum: [debug, info, warn, error, fatal]
+          default: warn
+          description: Lowest severity to include.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+          description: Maximum number of log entries to return, newest first.
+      required: [service]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { entries: [ { ts, level, service, message, trace_id, fields } ], truncated: bool }
+    redact: [env, tokens, authorization]
+
+  - name: get_service_health
+    description: >
+      Current health snapshot for one service or for every service. This is the tool to
+      call first when a symptom is vague, and again after a remediation to verify the
+      service actually recovered. Returns status, error rate, latency percentiles, replica
+      counts and the SLO burn rate.
+    provider: observability
+    method: get_service_health
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service name. Omit to get a snapshot of all services.
+      required: []
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { services: [ { service, status, error_rate_pct, p50_ms, p95_ms, p99_ms,
+                      replicas_desired, replicas_ready, slo_burn_rate, since } ] }
+    redact: []
+
+  - name: fetch_metrics
+    description: >
+      Query a numeric time series for one service and metric over a window. Use this to
+      confirm a hypothesis quantitatively — a saturation curve, a step change at a deploy
+      boundary, a memory sawtooth — rather than inferring it from log text alone.
+    provider: observability
+    method: fetch_metrics
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service name.
+        metric:
+          type: string
+          enum:
+            - cpu_utilization_pct
+            - memory_used_pct
+            - request_rate_rps
+            - error_rate_pct
+            - latency_p95_ms
+            - db_pool_active
+            - db_pool_max
+            - gc_pause_ms
+            - queue_depth
+          description: Which series to read. These names are the whole vocabulary; do not invent others.
+        window_minutes:
+          type: integer
+          minimum: 5
+          maximum: 4320
+          default: 60
+          description: How far back to read, in minutes.
+        step_seconds:
+          type: integer
+          minimum: 10
+          maximum: 3600
+          default: 60
+          description: Resolution of the returned series.
+      required: [service, metric]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 20
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.5
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { service, metric, unit, points: [ { ts, value } ], summary: { min, max, mean, last } }
+    redact: []
+
+  - name: get_recent_deploys
+    description: >
+      Deployment history for a service: who shipped what, when, and whether it was rolled
+      back. Call this early whenever a symptom has a sharp onset — a change boundary is the
+      single most common cause, and correlating onset with the nearest deploy is cheaper
+      than bisecting.
+    provider: observability
+    method: get_recent_deploys
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service name.
+        window_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          default: 72
+          description: How far back to list, in hours.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+          description: Maximum number of deploys, newest first.
+      required: [service]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { deploys: [ { id, service, version, commit, author, deployed_at, status,
+                     rolled_back, change_summary, files_touched } ] }
+    redact: [author_email]
+
+  - name: inspect_runtime
+    description: >
+      Read process-level state for a service: open connections, thread or worker counts,
+      blocked-thread stacks, connection-pool waiters. This is the deeper look you take when
+      a health snapshot says the service is degraded but logs alone do not explain why.
+    provider: observability
+    method: inspect_runtime
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service name.
+        replica:
+          type: string
+          description: >
+            Specific replica id to inspect, e.g. "checkout-api-7d9f-2". Omit to inspect a
+            representative unhealthy replica.
+        include:
+          type: array
+          items:
+            type: string
+            enum: [threads, connections, pool_stats, gc_stats, config]
+          description: Which sections to return. Defaults to connections and pool_stats.
+      required: [service]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 25
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.5
+      jitter: true
+      retry_on: [timeout, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { replica, sections: { connections, pool_stats, threads, gc_stats, config } }
+    redact: [config.env, config.secrets, connection_strings]

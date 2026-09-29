@@ -1,0 +1,122 @@
+# Memory seed for the devops profile.
+#
+# This file is the single most important fixture in the project: it is what makes the learning
+# curve real rather than asserted. A first run against this seed is generic; a later run against
+# it is specific, and the difference is exactly these rows.
+#
+# Every memory is written as a self-contained statement that still makes sense weeks later with
+# no surrounding context -- that is the horizon test from config/agents.md, applied to the
+# fixture rather than only to the agent.
+#
+# `id` is stable on purpose. `memory.influenced` events point at these ids, so regenerating them
+# would silently empty the trace's memory lane.
+version: 1
+
+memories:
+  - id: mem-0001
+    kind: failure
+    text: >
+      Restarting checkout-api for database connection pool exhaustion resolved nothing. The
+      service recovered for roughly 20 minutes and the incident recurred three times in 24 hours.
+      The cause was a deploy that lowered db_pool_max, which a restart cannot undo.
+    entities: [checkout-api, connection pool exhaustion, restart_service]
+    confidence: 0.95
+    observed_at: "2026-01-08T14:22:00Z"
+    source_run_id: run-000004
+
+  - id: mem-0002
+    kind: correction
+    text: >
+      Operator correction on checkout-api incidents: check the deploy history before restarting
+      anything. A restart hides a bad release and makes the next occurrence harder to diagnose.
+    entities: [checkout-api, deploy history, restart_service]
+    confidence: 0.9
+    observed_at: "2026-01-08T16:05:00Z"
+    source_run_id: run-000004
+
+  - id: mem-0003
+    kind: outcome
+    text: >
+      Raising db_pool_max on checkout-api from 10 to 60 resolved database connection pool
+      exhaustion. The change was applied as a config rollout, not a code deploy, and the error
+      rate returned to baseline within four minutes.
+    entities: [checkout-api, db_pool_max, connection pool exhaustion]
+    confidence: 0.9
+    observed_at: "2026-02-19T11:40:00Z"
+    source_run_id: run-000003
+
+  - id: mem-0004
+    kind: preference
+    text: >
+      The on-call operator wants a status-page update posted within 10 minutes of any incident
+      rated major or above, and never wants to be paged below major severity.
+    entities: [status page, page_oncall, incident severity]
+    confidence: 0.85
+    observed_at: "2026-02-02T09:00:00Z"
+    source_run_id: run-000002
+
+  - id: mem-0005
+    kind: entity_fact
+    text: >
+      checkout-api is owned by the Payments Platform team, whose on-call rotation is
+      payments-primary. Its database pool is configured by db_pool_max, which ships at a default
+      of 10 and is not sized for peak concurrency.
+    entities: [checkout-api, Payments Platform, db_pool_max]
+    confidence: 0.9
+    observed_at: "2026-02-02T09:00:00Z"
+    source_run_id: run-000002
+
+  - id: mem-0006
+    kind: entity_fact
+    text: >
+      checkout-api carries a 99.9% monthly availability SLO and a p95 latency target of 800ms.
+      Paging is warranted once the burn rate exceeds 2x over a 30-minute window.
+    entities: [checkout-api, SLO, p95 latency]
+    confidence: 0.85
+    observed_at: "2026-02-02T09:00:00Z"
+    source_run_id: run-000002
+
+  - id: mem-0007
+    kind: outcome
+    text: >
+      Correlating a symptom's onset with the nearest deploy boundary has been the fastest route
+      to root cause on this estate: in recent months it identified the cause on the first attempt
+      more often than log search alone.
+    entities: [deploy history, checkout-api, incident diagnosis]
+    confidence: 0.8
+    observed_at: "2026-02-27T10:15:00Z"
+    source_run_id: run-000008
+
+  # The three below are deliberately weak, stale, or narrow. They exist so that recall ranking
+  # and the horizon test have something real to reject, rather than a store in which every memory
+  # is equally good -- a state that would make a "memory helped" claim unfalsifiable.
+  - id: mem-0008
+    kind: outcome
+    text: >
+      Scaling search-api from 4 to 8 replicas relieved a queue backlog during a traffic spike.
+      Whether this generalises to other services is unconfirmed.
+    entities: [search-api, scale_replicas, queue depth]
+    confidence: 0.4
+    observed_at: "2025-12-03T18:30:00Z"
+    source_run_id: run-000001
+
+  - id: mem-0009
+    kind: failure
+    text: >
+      A rollback of payments-api was attempted for an unrelated latency regression and did not
+      help; the cause turned out to be an upstream dependency. Recorded so a future run does not
+      assume a rollback is always the answer.
+    entities: [payments-api, rollback_deploy]
+    confidence: 0.5
+    observed_at: "2025-11-14T07:45:00Z"
+    source_run_id: run-000001
+
+  - id: mem-0010
+    kind: preference
+    text: >
+      Post-incident write-ups on this team are expected to name the specific config key or commit
+      that caused the incident, not just the service.
+    entities: [postmortem, incident review]
+    confidence: 0.6
+    observed_at: "2025-10-01T12:00:00Z"
+    source_run_id: run-000001

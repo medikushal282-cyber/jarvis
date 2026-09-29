@@ -1,0 +1,52 @@
+# Approval and clarification script for the devops scenario.
+#
+# Drives `ScriptedHuman`, which is what keeps the confirm tier live in tests and in offline demos.
+# An approval-gated agent whose approvals are stubbed out is an agent whose safety features are
+# untested, and untested safety features are the ones that get quietly disabled before a demo.
+#
+# Rules are matched in order against the tool name; `"*"` is the fallback. `approve: false`
+# exercises the refusal path -- the loop must route that to RECOVER and must NOT retry the same
+# call, which is a claim worth being able to test rather than merely assert.
+version: 1
+
+rules:
+  # Rollback is the correct fix for this signature, so the operator agrees.
+  - tool: rollback_deploy
+    approve: true
+    by: priya.raghunathan@example.com
+    note: >
+      Approved. Undoing the v2.31.0 config change is the right call; a restart would only mask it.
+
+  # Restart is the wrong first move here. Declining exercises the refusal path, so the loop has to
+  # replan rather than ask the same question again.
+  - tool: restart_service
+    approve: false
+    by: priya.raghunathan@example.com
+    answer: >
+      Not approved. This signature has already recurred after restarts on this service. Check the
+      deploy history first.
+
+  - tool: scale_replicas
+    approve: true
+    by: priya.raghunathan@example.com
+    note: Approved, but note that scaling masks this rather than fixing it.
+
+  - tool: post_status_update
+    approve: true
+    by: incident-comms@example.com
+    note: Approved; please keep it customer-readable.
+
+  - tool: page_oncall
+    approve: false
+    by: priya.raghunathan@example.com
+    answer: Not yet. Page only if the burn rate stays above 2x for another 15 minutes.
+
+  - tool: open_ticket
+    approve: true
+
+  # Clarification answers, for the ambiguity path at UNDERSTAND.
+  - tool: "*"
+    approve: true
+    answer: >
+      Treat the objective as covering checkout-api only. Do not restart anything until the deploy
+      history has been checked.

@@ -1,0 +1,130 @@
+# Tool registry — communication and record-keeping.
+# Updating a status page or opening a ticket changes what other humans see, so these are
+# `mutating` and `confirm`-gated. Paging a human is included because an unnecessary page is
+# disruptive and, unlike a status update, wakes someone up.
+version: 1
+
+tools:
+  - name: post_status_update
+    description: >
+      Publish an update to the service status page. Write for a customer reading it, not
+      for an engineer: state impact, scope and what is being done, with no internal jargon
+      and no speculation about cause until the cause is confirmed. Post once when the
+      impact is understood and once when it is resolved; do not narrate your investigation
+      in public.
+    provider: comms
+    method: post_status_update
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Affected service.
+        status:
+          type: string
+          enum: [investigating, identified, monitoring, resolved]
+          description: Standard status-page phase. Use `identified` only once a cause is confirmed.
+        message:
+          type: string
+          description: Customer-facing text. Impact first, then action, then next update time.
+        severity:
+          type: string
+          enum: [minor, major, critical]
+          description: Customer-visible severity.
+      required: [service, status, message]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.5
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: false
+    side_effects: mutating
+    returns: "{ update_id, service, status, published_at, url }"
+    redact: []
+
+  - name: open_ticket
+    description: >
+      Open a tracked ticket for follow-up work that is real but not part of resolving the
+      current incident — a latent bug, a missing alert, a runbook that was wrong. Use it so
+      that a finding is not lost when the incident closes. Do not use it in place of
+      finishing the objective.
+    provider: comms
+    method: open_ticket
+    parameters:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Specific and actionable, e.g. "checkout-api pool max is below peak concurrency".
+        body:
+          type: string
+          description: What was observed, with the evidence, and the suggested change.
+        labels:
+          type: array
+          items:
+            type: string
+          description: Free-form labels, e.g. ["reliability", "tech-debt"].
+        severity:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+          description: Follow-up priority.
+        links:
+          type: array
+          items:
+            type: string
+          description: Related incident ids, runbook ids or dashboard urls.
+      required: [title, body]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.5
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: false
+    side_effects: mutating
+    returns: "{ ticket_id, url, title, created_at }"
+    redact: []
+
+  - name: page_oncall
+    description: >
+      Page the human on-call engineer for this service. This interrupts someone, so use it
+      only when the incident meets the paging threshold in the objective, or when
+      escalate_to_human has already been chosen and the urgency warrants waking a person.
+      For anything that can wait until business hours, open a ticket instead.
+    provider: comms
+    method: page_oncall
+    parameters:
+      type: object
+      properties:
+        service:
+          type: string
+          description: Service whose on-call rotation should be paged.
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Paging urgency; determines the notification channel.
+        message:
+          type: string
+          description: What the human needs to know in one or two sentences, including the incident id.
+      required: [service, urgency, message]
+      additionalProperties: false
+    permission: confirm
+    timeout_s: 20
+    retry:
+      max_attempts: 2
+      backoff: fixed
+      base_delay_s: 1.0
+      jitter: false
+      retry_on: [timeout, provider_5xx]
+    idempotent: false
+    side_effects: mutating
+    returns: "{ page_id, notified: [ { name, channel, sent_at } ], acknowledged_by }"
+    redact: [phone, email]

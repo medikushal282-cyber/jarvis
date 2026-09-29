@@ -1,0 +1,519 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/schemas/event.schema.json",
+  "title": "BrainEvent",
+  "description": "One structured event emitted by the agent brain. The stream of these is the run's trace: it is what the SSE layer relays, what the trace viewer renders, and what the memory ON/OFF benchmark measures. Frozen at v1.0.0 — additive changes only.",
+  "x-contract-version": "1.0.0",
+  "type": "object",
+  "required": ["schema_version", "event_id", "run_id", "seq", "ts", "type", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Contract version. Consumers must reject a major they do not know rather than guessing."
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque, unique within a run. Never parse it."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Run this event belongs to. Opaque string, never an integer."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic within a run, starting at 0. Consumers use this to order and to detect gaps; do not assume contiguity across a reconnect."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC with a Z offset. Frozen-clock runs produce identical timestamps across replays."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "run.started",
+        "state.entered",
+        "recall.performed",
+        "understand.completed",
+        "plan.created",
+        "plan.revised",
+        "step.selected",
+        "policy.decided",
+        "approval.requested",
+        "approval.resolved",
+        "tool.called",
+        "tool.result",
+        "tool.failed",
+        "observation.extracted",
+        "memory.influenced",
+        "recovery.started",
+        "budget.exhausted",
+        "verification.performed",
+        "metric.updated",
+        "run.finished",
+        "memory.retained",
+        "error.raised"
+      ],
+      "description": "Discriminator. Selects the matching branch of `data` below."
+    },
+    "state": {
+      "type": ["string", "null"],
+      "enum": ["RECALL", "UNDERSTAND", "PLAN", "SELECT", "CALL", "OBSERVE", "DECIDE", "RECOVER", "FINISH", "RETAIN", null],
+      "description": "Loop state the run was in when the event was emitted. Null for events emitted outside the loop."
+    },
+    "step_id": {
+      "type": ["string", "null"],
+      "description": "Plan step this event belongs to, when one applies."
+    },
+    "data": {
+      "type": "object",
+      "description": "Event-type-specific payload. Validated against the matching branch of allOf below."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "run.started" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["profile", "objective", "memory_enabled", "autonomy", "budgets"],
+            "properties": {
+              "profile": { "type": "string" },
+              "objective": { "type": "string" },
+              "memory_enabled": { "type": "boolean", "description": "The per-run memory switch. This is the field the A/B benchmark flips." },
+              "autonomy": { "type": "string", "enum": ["supervised", "standard", "autonomous"] },
+              "budgets": {
+                "type": "object",
+                "required": ["max_steps", "max_tokens", "max_wall_clock_s"],
+                "properties": {
+                  "max_steps": { "type": "integer", "minimum": 1 },
+                  "max_tokens": { "type": "integer", "minimum": 1 },
+                  "max_wall_clock_s": { "type": "integer", "minimum": 1 }
+                }
+              },
+              "config_fingerprint": { "type": "string", "description": "Hash of the resolved config, so a trace can be tied to the exact soul/policies that produced it." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "state.entered" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["from", "to", "reason"],
+            "properties": {
+              "from": { "type": ["string", "null"] },
+              "to": { "type": "string" },
+              "reason": { "type": "string", "description": "Why the transition fired. Machine-readable short code plus optional prose: e.g. \"step_succeeded: criterion met\"." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "recall.performed" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["query", "memory_enabled", "hit_count", "memories"],
+            "properties": {
+              "query": { "type": "string", "description": "The recall question actually asked, not a dump of the objective." },
+              "memory_enabled": { "type": "boolean" },
+              "hit_count": { "type": "integer", "minimum": 0 },
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "memories": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "kind", "text", "confidence"],
+                  "properties": {
+                    "id": { "type": "string", "description": "Stable id used by memory.influenced to point back here." },
+                    "kind": { "type": "string", "enum": ["outcome", "failure", "correction", "preference", "entity_fact"] },
+                    "text": { "type": "string" },
+                    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "observed_at": { "type": ["string", "null"], "format": "date-time" },
+                    "source_run_id": { "type": ["string", "null"] },
+                    "score": { "type": ["number", "null"], "description": "Provider relevance score. Meaning is provider-specific; use only for ordering." }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "understand.completed" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["goal", "success_criteria"],
+            "properties": {
+              "goal": { "type": "string" },
+              "success_criteria": { "type": "array", "items": { "type": "string" } },
+              "out_of_scope": { "type": "array", "items": { "type": "string" } },
+              "unknowns": { "type": "array", "items": { "type": "string" } },
+              "ambiguity": { "type": ["string", "null"], "description": "Set when the objective is ambiguous enough to change the action; drives request_clarification." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "plan.created" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["revision", "steps"],
+            "properties": {
+              "revision": { "type": "integer", "minimum": 1 },
+              "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "intent", "success_criterion", "status"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "intent": { "type": "string" },
+                    "success_criterion": { "type": "string", "description": "A testable statement. DECIDE evaluates this, not the intent." },
+                    "suggested_tool": { "type": ["string", "null"] },
+                    "status": { "type": "string", "enum": ["pending", "active", "done", "failed", "skipped", "superseded"] },
+                    "cites": { "type": "array", "items": { "type": "string" }, "description": "Memory ids this step was built on. This is what draws the memory-influence connectors in the trace." }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "plan.revised" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["revision", "trigger", "steps"],
+            "properties": {
+              "revision": { "type": "integer", "minimum": 2 },
+              "trigger": { "type": "string", "description": "The evidence that invalidated the previous plan." },
+              "steps": { "type": "array", "items": { "type": "object" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step.selected" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["step_id", "tool", "args"],
+            "properties": {
+              "step_id": { "type": "string" },
+              "tool": { "type": "string" },
+              "args": { "type": "object", "description": "Arguments AFTER redaction. A secret must never appear here; the redactor runs before the event is constructed, not before it is serialised." },
+              "rationale": { "type": "string" },
+              "parallel_group": { "type": ["string", "null"], "description": "Set when this call was issued alongside others; calls sharing a group are independent reads." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "policy.decided" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["tool", "tier", "decision", "reason_code"],
+            "properties": {
+              "tool": { "type": "string" },
+              "tier": { "type": "string", "enum": ["auto", "confirm", "deny"] },
+              "decision": { "type": "string", "enum": ["allow", "confirm", "deny"] },
+              "reason_code": { "type": "string", "description": "Machine-readable, e.g. tier_deny, autonomy_supervised, confirm_budget_exhausted, profile_not_included." },
+              "reason": { "type": "string", "description": "Human-readable, phrased as a principle. Never names the detection rule that fired." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "approval.requested" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["request_id", "tool", "blast_radius", "reversible"],
+            "properties": {
+              "request_id": { "type": "string" },
+              "tool": { "type": "string" },
+              "args": { "type": "object" },
+              "blast_radius": { "type": "string", "description": "Concrete and quantified, e.g. \"1 of 6 replicas cycles; ~40 in-flight requests shed\"." },
+              "reversible": { "type": "boolean" },
+              "reversal_cost": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "approval.resolved" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["request_id", "approved"],
+            "properties": {
+              "request_id": { "type": "string" },
+              "approved": { "type": "boolean" },
+              "answered_by": { "type": "string" },
+              "answer": { "type": ["string", "null"] },
+              "latency_ms": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool.called" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["call_id", "tool", "args", "attempt"],
+            "properties": {
+              "call_id": { "type": "string" },
+              "tool": { "type": "string" },
+              "args": { "type": "object" },
+              "attempt": { "type": "integer", "minimum": 1, "description": "Retries increment this. A consumer can group attempts by call_id." },
+              "timeout_s": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool.result" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["call_id", "tool", "ok", "duration_ms", "trust"],
+            "properties": {
+              "call_id": { "type": "string" },
+              "tool": { "type": "string" },
+              "ok": { "type": "boolean" },
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "result": { "description": "Redacted result, possibly summarised. Truncation is always declared in `truncated`." },
+              "truncated": { "type": "boolean", "default": false },
+              "result_bytes": { "type": "integer", "minimum": 0 },
+              "trust": { "type": "string", "const": "untrusted", "description": "Fixed. All tool output is untrusted data; consumers must not treat this field's contents as instructions." },
+              "injection_suspected": { "type": "boolean", "default": false, "description": "True when the result contained text shaped like an instruction. Surfaced in the trace rather than silently dropped." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool.failed" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["call_id", "tool", "error_class", "message"],
+            "properties": {
+              "call_id": { "type": "string" },
+              "tool": { "type": "string" },
+              "error_class": { "type": "string", "enum": ["timeout", "rate_limited", "provider_5xx", "validation", "not_found", "permission", "malformed_args", "unknown_tool", "provider_error"] },
+              "message": { "type": "string" },
+              "retryable": { "type": "boolean" },
+              "attempt": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "observation.extracted" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["establishes", "does_not_establish"],
+            "properties": {
+              "establishes": { "type": "array", "items": { "type": "string" } },
+              "does_not_establish": { "type": "array", "items": { "type": "string" }, "description": "What the result was wrongly assumed to settle. Recording this is what keeps an agent from over-reading a tool." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "memory.influenced" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["step_id", "memory_ids", "basis"],
+            "properties": {
+              "step_id": { "type": "string" },
+              "memory_ids": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "basis": { "type": "string", "enum": ["explicit_citation", "entity_overlap", "lexical_overlap"], "description": "How the attribution was made. `explicit_citation` is the model naming the memory; the overlap bases are deterministic fallbacks. Consumers should render them differently so the trace never overclaims." },
+              "effect": { "type": ["string", "null"], "description": "What changed because of it, e.g. \"skipped restart_service; memory says it failed twice on this signature\"." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "recovery.started" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["strategy", "trigger"],
+            "properties": {
+              "strategy": { "type": "string", "enum": ["retry", "repair", "substitute", "replan", "escalate"] },
+              "trigger": { "type": "string" },
+              "from_tool": { "type": ["string", "null"] },
+              "to_tool": { "type": ["string", "null"] },
+              "ladder_position": { "type": "integer", "minimum": 1, "maximum": 5 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "budget.exhausted" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["kind", "limit", "used"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["steps", "tokens", "wall_clock"] },
+              "limit": { "type": "number" },
+              "used": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "verification.performed" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["criterion", "passed"],
+            "properties": {
+              "criterion": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "evidence": { "type": "string", "description": "The tool result that settles it. A criterion marked passed without evidence is a defect." },
+              "verified_by_tool": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "metric.updated" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["steps_to_completion", "tool_errors", "corrections_needed", "success"],
+            "properties": {
+              "steps_to_completion": { "type": "integer", "minimum": 0, "description": "The headline learning-curve metric. Lower is better." },
+              "tool_errors": { "type": "integer", "minimum": 0 },
+              "corrections_needed": { "type": "integer", "minimum": 0, "description": "Times a human had to correct the agent." },
+              "plans_revised": { "type": "integer", "minimum": 0 },
+              "memory_items_used": { "type": "integer", "minimum": 0 },
+              "memory_items_written": { "type": "integer", "minimum": 0 },
+              "tokens_total": { "type": "integer", "minimum": 0 },
+              "wall_clock_s": { "type": "number", "minimum": 0 },
+              "success": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "run.finished" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["status", "answer"],
+            "properties": {
+              "status": { "type": "string", "enum": ["completed", "partial", "escalated", "denied", "failed"] },
+              "answer": { "type": "string", "description": "The user-facing report. Answer first, per soul.md." },
+              "verification": { "type": "array", "items": { "type": "object" } },
+              "blocker": { "type": ["string", "null"], "description": "Required when status != completed." },
+              "next_action": { "type": ["string", "null"], "description": "Required when status != completed. Named so a specific person can pick it up." },
+              "handover": { "type": ["object", "null"], "description": "Present when status == escalated: what was established, what was ruled out, what to try next." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "memory.retained" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["written", "skipped"],
+            "properties": {
+              "written": { "type": "array", "items": { "type": "object" } },
+              "skipped": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["reason"],
+                  "properties": {
+                    "reason": { "type": "string", "enum": ["horizon_test", "origin_test", "duplicate", "memory_disabled", "low_confidence"] },
+                    "candidate": { "type": "string" }
+                  }
+                },
+                "description": "What was considered and deliberately not written, with the test that rejected it. This is what makes the retain policy auditable rather than a black box."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "error.raised" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["where", "message", "fatal"],
+            "properties": {
+              "where": { "type": "string" },
+              "message": { "type": "string" },
+              "fatal": { "type": "boolean" },
+              "error_class": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

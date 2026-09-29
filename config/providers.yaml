@@ -1,0 +1,168 @@
+# Provider registry — the single place where the brain is wired to the outside world.
+#
+# The brain never imports a teammate's module directly. It asks for a capability by name,
+# and this file decides which implementation answers. That is what makes the mock -> real
+# swap a one-line edit: change `impl` below, restart or hot-reload, and nothing in the
+# reasoning loop changes.
+#
+# Precedence, highest first:
+#   1. environment variable   BRAIN_PROVIDER__<CAPABILITY>=<impl>   e.g. BRAIN_PROVIDER__LLM=groq
+#   2. per-run override       API / CLI run parameter
+#   3. this file
+#
+# So a demo can flip one capability without editing anything on disk, and a deployment can
+# pin its choices in version control. Neither path requires a code change.
+version: 1
+
+providers:
+  # ---------------------------------------------------------------- reasoning
+  llm:
+    impl: fake # fake | groq
+    settings:
+      # `fake` is a scripted LLM. It is a real implementation of the same interface, not a
+      # monkeypatch, so the whole loop is exercised by it in tests and in offline demos.
+      script: config/fixtures/fake_llm/devops_pool_exhaustion.yaml
+      # `groq` settings — credentials come from the environment only, never from this file.
+      api_base: https://api.groq.com/openai/v1
+      # Model ladder, tried in order. A list rather than a primary/fallback pair: a two-slot
+      # shape would need reshaping the first time a third rung was wanted, and a list lets the
+      # client degrade by rule instead of by special case. Verified 2026-09-29 against
+      # console.groq.com/docs/{models,deprecations}; see docs/brain/MODEL_LADDER.md.
+      #
+      # qwen/qwen3-32b is NOT here even though the hackathon brief recommends it: it was shut
+      # down 07/17/26 and calling it fails outright. Same for qwen/qwen3.6-27b (09/14/26), which
+      # was this file's fallback in an earlier revision.
+      #
+      # llama-3.3-70b-versatile and llama-3.1-8b-instant are deliberately absent: Groq's
+      # deprecations page lists both as shut down on 08/16/26 while its models page still lists
+      # them as production. Two official pages disagree, so nothing is built on them.
+      model_ladder:
+        - openai/gpt-oss-120b   # production; tool use; 131k ctx
+        - openai/gpt-oss-20b    # production; same family, so tool-call semantics match rung 1
+        - qwen/qwen3.8-27b      # PREVIEW: docs say "evaluation purposes only", not for production
+      # A 404 or "decommissioned" response advances to the next rung rather than failing the run.
+      # The rung that actually served is recorded in the response's `raw`, so the trace shows it.
+      model_fallback_on_404: true
+      # gpt-oss accepts ONLY low|medium|high -- not "none", which is Qwen-only. Validated as an
+      # enum in the client rather than trusted, because anything else is a 400 waiting to happen.
+      reasoning_effort: medium
+      reasoning_effort_allowed: [low, medium, high]
+      api_key_env: GROQ_API_KEY
+      temperature: 0.2
+      max_tokens: 4096
+      # The API defaults parallel_tool_calls to true, but gpt-oss-120b does not support it
+      # and the docs table contradicts the default. Send false explicitly, and still handle
+      # N calls in a response — a provider that ignores the flag is not our bug to crash on.
+      parallel_tool_calls: false
+      # Cap on calls we will execute from a single response, whatever the provider returns.
+      max_parallel_calls: 3
+      request_timeout_s: 60
+      max_attempts: 4
+      backoff_base_s: 0.8
+      backoff_max_s: 20
+      # Fallback ladder when native tool calling fails validation.
+      # NOTE: `json_mode` is NOT "the same request plus response_format". Groq forbids
+      # structured outputs and `tools` in one request, so that rung must drop `tools`
+      # entirely and ask for a JSON object describing the call instead. `disable_native_tools`
+      # on the request is what signals that. `constrained_text` is the local-grammar last
+      # resort.
+      parse_ladder: [native_tools, json_mode, constrained_text]
+      # A response cut off at the token limit can contain a partial tool call. Treated as
+      # malformed and repaired rather than executed, so truncation is never blamed on the
+      # model's formatting.
+      repair_on_truncation: true
+      # Cheap local estimate; the provider's own usage counts are used when present.
+      token_estimator: chars_over_four
+
+  # ---------------------------------------------------------------- memory
+  memory:
+    impl: mock # mock | hindsight
+    settings:
+      # `mock` is an in-process store with lexical recall, seeded from a fixture file. It is
+      # deterministic, which is what lets the memory ON/OFF benchmark be reproducible.
+      store_path: .brain/state/memory.json
+      seed: config/fixtures/memory/devops_seed.yaml
+      recall_limit: 8
+      # `hindsight` settings.
+      base_url: https://api.hindsight.vectorize.io
+      api_key_env: HINDSIGHT_API_KEY
+      bank: jarvis-incidents
+      timeout_s: 20
+      max_attempts: 3
+
+  # ---------------------------------------------------------------- tool providers
+  # Each maps to the `provider:` field on tools in config/tools/*.yaml. Adding a provider
+  # means adding a module under brain/providers/<name>.py that exposes the declared methods.
+  observability:
+    impl: mock # mock | real
+    settings:
+      fixture_dir: config/fixtures/observability
+      latency_ms: 0
+
+  incident:
+    impl: mock
+    settings:
+      fixture_dir: config/fixtures/incident
+      latency_ms: 0
+
+  remediation:
+    impl: mock
+    settings:
+      fixture_dir: config/fixtures/remediation
+      latency_ms: 0
+      # The mock actually applies changes to its in-memory world so that verify-after-act
+      # is exercised end to end rather than always reporting success.
+      apply_changes: true
+
+  comms:
+    impl: mock
+    settings:
+      fixture_dir: config/fixtures/comms
+      latency_ms: 0
+
+  crm:
+    impl: mock
+    settings:
+      fixture_dir: config/fixtures/crm
+      latency_ms: 0
+
+  support:
+    impl: mock
+    settings:
+      fixture_dir: config/fixtures/support
+      latency_ms: 0
+
+  # ---------------------------------------------------------------- loop plumbing
+  clock:
+    impl: system # system | frozen
+    settings:
+      # `frozen` makes every timestamp in events, budgets and metrics reproducible.
+      frozen_at: "2026-03-14T09:12:00Z"
+
+  ids:
+    impl: uuid # uuid | sequential
+    settings:
+      # `sequential` gives stable ids so trace snapshots are byte-identical across runs.
+      prefix: run
+
+  human:
+    impl: mock # mock | cli | api
+    settings:
+      # Answers confirm-tier requests and clarification questions.
+      # `mock` is driven by a scripted response file so unattended runs and tests can
+      # exercise the approval path without a person present.
+      response_script: config/fixtures/human/devops_approvals.yaml
+      default_answer: approve
+      timeout_s: 300
+
+  events:
+    impl: memory # memory | stdout | jsonl
+    settings:
+      # `memory` collects events for assertions and trace rendering;
+      # `jsonl` appends them for the SSE layer and the trace viewer to tail.
+      sink_path: .brain/state/events.jsonl
+
+  artifacts:
+    impl: filesystem # filesystem | none
+    settings:
+      root: .brain/artifacts

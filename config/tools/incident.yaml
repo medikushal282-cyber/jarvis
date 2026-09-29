@@ -1,0 +1,167 @@
+# Tool registry — incident knowledge and escalation.
+# These tools connect the run to what the organisation already knows: runbooks, past
+# incidents, and the human who can unblock it. Escalation tools exist so that "I should
+# ask a person" is a first-class move the planner can take, rather than a failure mode.
+version: 1
+
+tools:
+  - name: fetch_runbook
+    description: >
+      Retrieve the operational runbook matching a symptom or service. Call this before
+      choosing a remediation: the runbook states the ordered checks the team has agreed on
+      and the actions that require a human. If it returns several candidates, prefer the
+      one whose `trigger` best matches the observed signature.
+    provider: incident
+    method: fetch_runbook
+    parameters:
+      type: object
+      properties:
+        symptom:
+          type: string
+          description: >
+            Short description of what is wrong, e.g. "connection pool exhaustion",
+            "elevated 5xx", "queue backlog". Matched against runbook triggers.
+        service:
+          type: string
+          description: Optional service name to narrow the match.
+      required: [symptom]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.3
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { runbooks: [ { id, title, trigger, service, steps: [ { order, action, tool_hint,
+                      requires_approval } ], last_reviewed, owner } ] }
+    redact: []
+
+  - name: search_incident_history
+    description: >
+      Search the incident record for past incidents matching a service, symptom or error
+      signature, and return how each was actually resolved. This is the structured
+      operational record, distinct from remembered experience: it returns authoritative
+      post-incident data, including the fix that worked and the one that made things worse.
+    provider: incident
+    method: search_incident_history
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Free-text match, e.g. "pool exhaustion" or "TimeoutException checkout".
+        service:
+          type: string
+          description: Optional service name to narrow results.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Maximum number of past incidents, most recent first.
+      required: [query]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      base_delay_s: 0.4
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { incidents: [ { id, service, title, opened_at, resolved_at, duration_minutes,
+                       severity, root_cause, resolution_steps, resolution_worked: bool,
+                       what_failed, postmortem_url } ] }
+    redact: []
+
+  - name: request_clarification
+    description: >
+      Ask the operator a question and stop until they answer. Use this when the objective
+      is genuinely ambiguous, when two remediations are equally plausible and the choice is
+      not yours to make, or when a needed input (an approval, an identifier, a business
+      decision) can only come from a person. State exactly what you need and why, and offer
+      the options you are choosing between. Do not use this to ask permission for something
+      a policy already pre-approves — that is what the confirm tier is for.
+    provider: incident
+    method: request_clarification
+    parameters:
+      type: object
+      properties:
+        question:
+          type: string
+          description: The single question you need answered. One question, not a list.
+        why_blocked:
+          type: string
+          description: What you cannot decide or do without the answer.
+        options:
+          type: array
+          items:
+            type: string
+          description: The concrete choices you are weighing, so the operator can pick one instead of writing prose.
+      required: [question, why_blocked]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 5
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      base_delay_s: 0
+      jitter: false
+      retry_on: []
+    idempotent: true
+    side_effects: none
+    returns: "{ answer: string, answered_by: string, answered_at: iso8601 }"
+    redact: []
+
+  - name: escalate_to_human
+    description: >
+      Hand the incident to a human on-call engineer with a written handover. Use this when
+      you have exhausted safe automated options, when the remaining fix is destructive
+      beyond your authority, or when the blast radius is larger than the objective allows.
+      The handover must include what you ruled out and what you would try next, so the human
+      does not repeat your work.
+    provider: incident
+    method: escalate_to_human
+    parameters:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Why this cannot be finished autonomously.
+        summary:
+          type: string
+          description: What you established — symptom, evidence, root cause if known.
+        ruled_out:
+          type: array
+          items:
+            type: string
+          description: Hypotheses you investigated and disproved, with the evidence.
+        suggested_next:
+          type: string
+          description: The action you would take if you had the authority.
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+          description: How quickly a human needs to act.
+      required: [reason, summary]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 15
+    retry:
+      max_attempts: 2
+      backoff: fixed
+      base_delay_s: 1.0
+      jitter: false
+      retry_on: [timeout, provider_5xx]
+    idempotent: true
+    side_effects: mutating
+    returns: "{ handover_id, paged: [ { name, role, channel } ], acknowledged_by }"

@@ -1,0 +1,124 @@
+# Tool registry — memory.
+#
+# Memory is not only a state in the loop. `recall_memory` is exposed as a tool because the
+# agent often knows *mid-plan* that it needs a specific fact it did not ask for at RECALL
+# time ("what did we try last time on this service?"). Letting the planner reach back for
+# it is cheaper and more precise than pre-loading everything a step earlier.
+#
+# `save_memory` is exposed for the same reason in reverse: sometimes the agent learns
+# something worth keeping *before* the run ends — an operator preference, a correction, a
+# fact about an entity. The RETAIN state still runs at the end; this is the exception path
+# for things that would otherwise be lost if the run failed midway.
+#
+# Both are `auto`: remembering and recalling change nothing in the world, and gating them
+# behind a human would defeat the point.
+version: 1
+
+tools:
+  - name: recall_memory
+    description: >
+      Search remembered experience for facts relevant to a specific question. Use this
+      mid-plan when you need something the initial recall did not surface — a past
+      resolution for a service, a stated operator preference, an entity fact such as an
+      owner or an SLO. Ask a focused question and pass the entities involved; a vague query
+      returns vague memories.
+    provider: memory
+    method: recall_memory
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: >
+            What you want to know, phrased as a question or a specific lookup,
+            e.g. "what fixed checkout-api pool exhaustion last time?".
+        entities:
+          type: array
+          items:
+            type: string
+          description: >
+            Names to anchor the search — services, people, error signatures, runbook ids.
+            These narrow recall considerably; supply them when you have them.
+        kinds:
+          type: array
+          items:
+            type: string
+            enum: [outcome, failure, correction, preference, entity_fact]
+          description: >
+            Restrict to particular memory kinds. Use `preference` to check how this operator
+            likes things done, and `failure` to avoid repeating a fix that already failed.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of memories to return.
+      required: [query]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.3
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: true
+    side_effects: none
+    returns: >
+      { memories: [ { id, kind, text, entities, confidence, observed_at, source_run_id,
+                      times_recalled, outcomes: { applied: int, succeeded: int } } ] }
+    redact: []
+
+  - name: save_memory
+    description: >
+      Record something worth carrying into future runs, before this run ends. Save an
+      operator correction or preference, a fact about an entity that took effort to
+      establish, or a resolution that worked. Write it as a standalone statement that will
+      still make sense weeks later with no surrounding context: name the entities
+      explicitly, and say what happened and what it implies. Do not save narration of this
+      run, restatements of the objective, or anything already in the incident record — the
+      RETAIN state handles the ordinary case automatically.
+    provider: memory
+    method: save_memory
+    parameters:
+      type: object
+      properties:
+        text:
+          type: string
+          description: >
+            A self-contained sentence or two. Bad: "fixed it". Good: "checkout-api pod
+            restarts are caused by DB pool exhaustion when db_pool_max is left at the
+            default 10; raising it to 60 resolved the last two occurrences."
+        kind:
+          type: string
+          enum: [outcome, failure, correction, preference, entity_fact]
+          description: >
+            outcome = something that worked; failure = something that did not, and why;
+            correction = the operator told us we were wrong; preference = how this operator
+            wants things done; entity_fact = a durable fact about a service, person or system.
+        entities:
+          type: array
+          items:
+            type: string
+          description: Names this memory should be findable by.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.7
+          description: How sure you are. Use below 0.5 for a single unconfirmed observation.
+      required: [text, kind]
+      additionalProperties: false
+    permission: auto
+    timeout_s: 10
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay_s: 0.3
+      jitter: true
+      retry_on: [timeout, rate_limited, provider_5xx]
+    idempotent: false
+    side_effects: mutating
+    returns: "{ memory_id, stored: bool, deduplicated_with }"
+    redact: []
