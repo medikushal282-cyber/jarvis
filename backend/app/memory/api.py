@@ -4,12 +4,14 @@ from .context_builder import ContextBuilder
 from .extractor import MemoryExtractor
 from .hindsight.adapter import HindsightAdapter
 from .okf.manager import OKFManager
+from .reflection import MemoryReflector
 
 # Singletons for the subsystem
 _hindsight_adapter = HindsightAdapter()
 _okf_manager = OKFManager()
 _context_builder = ContextBuilder(hindsight=_hindsight_adapter, okf=_okf_manager)
 _extractor = MemoryExtractor()
+_reflector = MemoryReflector(hindsight=_hindsight_adapter, okf=_okf_manager)
 
 def build_context(
     user_id: str,
@@ -90,3 +92,13 @@ def update_project_knowledge(user_id: str, project_id: str, topic: str, content:
     Updates structured project knowledge (OKF).
     """
     _okf_manager.update_project_knowledge(user_id, project_id, topic, content, metadata)
+
+def reflect(
+    user_id: str,
+    objective: Optional[str] = None,
+    project_id: Optional[str] = None
+):
+    """
+    Triggers memory reflection to evaluate recent experiences and promote durable knowledge.
+    """
+    _reflector.reflect(user_id, objective, project_id)
