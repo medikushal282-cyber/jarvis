@@ -41,7 +41,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
     const fetchModels = async () => {
       try {
         setLoading(true);
-        const res = await fetch('http://localhost:8000/api/models');
+        const res = await fetch('http://localhost:8006/api/models');
         if (res.ok) {
           const data = await res.json();
           setModels(data.models || []);

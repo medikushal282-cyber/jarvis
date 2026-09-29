@@ -5,6 +5,8 @@ import ThinkingView, { ThoughtItem } from "@/components/ThinkingView";
 import BrowserPreview from "@/components/BrowserPreview";
 import ModelSelectorModal from "@/components/ModelSelector";
 import FilePickerModal from "@/components/FilePickerModal";
+import { useVoice } from "@/lib/runtime";
+import { JarvisVoiceOverlay } from "@/components/Voice";
 
 interface ToolActivity {
   id: string;
@@ -63,14 +65,14 @@ export default function FraidayWorkspace() {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [thoughts, setThoughts] = useState<ThoughtItem[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState("http://localhost:8000/api/preview/index.html");
+  const [previewUrl, setPreviewUrl] = useState("http://localhost:8006/api/preview/index.html");
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   
   const [commandModalOpen, setCommandModalOpen] = useState(false);
   
   // Helper to ensure preview URLs are relative to workspace root
   const getRelativePreviewUrl = (targetPath: string) => {
-    if (!targetPath) return "http://localhost:8000/api/preview/index.html";
+    if (!targetPath) return "http://localhost:8006/api/preview/index.html";
     let rel = targetPath;
     if (workspaceRoot && rel.startsWith(workspaceRoot)) {
       rel = rel.substring(workspaceRoot.length);
@@ -82,7 +84,7 @@ export default function FraidayWorkspace() {
       rel = parts[parts.length - 1];
     }
     const wsIdStr = activeWorkspaceId ? `/${activeWorkspaceId}` : '/default';
-    return `http://localhost:8000/api/preview${wsIdStr}/${rel}`;
+    return `http://localhost:8006/api/preview${wsIdStr}/${rel}`;
   };
 
   const [inputVal, setInputVal] = useState("");
@@ -124,11 +126,26 @@ export default function FraidayWorkspace() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
+
+  const handleVoiceTranscript = (transcript: any) => {
+    if (transcript && !transcript.empty && transcript.text && transcript.text.trim()) {
+      setVoiceOverlayOpen(false);
+      startRunWithText(transcript.text.trim(), "voice");
+    }
+  };
+
+  const voice = useVoice({
+    sessionId: activeConversationId || undefined,
+    workspaceId: activeWorkspaceId,
+    onTranscript: handleVoiceTranscript,
+  });
+
   // Fetch real workspace and runtime information from backend on mount
   useEffect(() => {
     const fetchWorkspace = async () => {
       try {
-        const res = await fetch("http://localhost:8000/api/workspace");
+        const res = await fetch("http://localhost:8006/api/workspace");
         if (res.ok) {
           const data = await res.json();
           if (data.name) setWorkspace(data.name);
@@ -145,7 +162,7 @@ export default function FraidayWorkspace() {
   // Fetch sandbox workspaces
   const fetchSandboxWorkspaces = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/sandbox/workspaces');
+      const res = await fetch('http://localhost:8006/api/sandbox/workspaces');
       if (res.ok) {
         const data = await res.json();
         const list = data.workspaces || [];
@@ -166,7 +183,7 @@ export default function FraidayWorkspace() {
     if (!activeWorkspaceId) { setSandboxConversations([]); return; }
     const fetchConvos = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/sandbox/workspaces/${activeWorkspaceId}/conversations`);
+        const res = await fetch(`http://localhost:8006/api/sandbox/workspaces/${activeWorkspaceId}/conversations`);
         if (res.ok) {
           const data = await res.json();
           const convs = data.conversations || [];
@@ -183,7 +200,7 @@ export default function FraidayWorkspace() {
   const createSandboxWorkspace = async () => {
     if (!newWorkspaceName.trim()) return;
     try {
-      const res = await fetch('http://localhost:8000/api/sandbox/workspaces', {
+      const res = await fetch('http://localhost:8006/api/sandbox/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newWorkspaceName.trim() })
@@ -203,7 +220,7 @@ export default function FraidayWorkspace() {
   const createSandboxConversation = async () => {
     if (!newConvoTitle.trim() || !activeWorkspaceId) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/sandbox/workspaces/${activeWorkspaceId}/conversations`, {
+      const res = await fetch(`http://localhost:8006/api/sandbox/workspaces/${activeWorkspaceId}/conversations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newConvoTitle.trim() })
@@ -212,7 +229,7 @@ export default function FraidayWorkspace() {
         const data = await res.json();
         setNewConvoTitle('');
         setShowNewConvoInput(false);
-        const convRes = await fetch(`http://localhost:8000/api/sandbox/workspaces/${activeWorkspaceId}/conversations`);
+        const convRes = await fetch(`http://localhost:8006/api/sandbox/workspaces/${activeWorkspaceId}/conversations`);
         if (convRes.ok) {
           const cData = await convRes.json();
           setSandboxConversations(cData.conversations || []);
@@ -233,7 +250,7 @@ export default function FraidayWorkspace() {
   const persistMessage = async (role: string, content: string, metadata?: any) => {
     if (!activeWorkspaceId || !activeConversationId) return;
     try {
-      await fetch(`http://localhost:8000/api/sandbox/workspaces/${activeWorkspaceId}/conversations/${activeConversationId}/messages`, {
+      await fetch(`http://localhost:8006/api/sandbox/workspaces/${activeWorkspaceId}/conversations/${activeConversationId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content, metadata })
@@ -246,7 +263,7 @@ export default function FraidayWorkspace() {
     setActiveWorkspaceId(wsId);
     setActiveConversationId(convId);
     try {
-      const res = await fetch(`http://localhost:8000/api/sandbox/workspaces/${wsId}/conversations/${convId}`);
+      const res = await fetch(`http://localhost:8006/api/sandbox/workspaces/${wsId}/conversations/${convId}`);
       if (res.ok) {
         const data = await res.json();
         setChatHistory(data.messages || []);
@@ -262,7 +279,7 @@ export default function FraidayWorkspace() {
   // Delete workspace
   const deleteSandboxWorkspace = async (wsId: string) => {
     try {
-      await fetch(`http://localhost:8000/api/sandbox/workspaces/${wsId}`, { method: 'DELETE' });
+      await fetch(`http://localhost:8006/api/sandbox/workspaces/${wsId}`, { method: 'DELETE' });
       if (activeWorkspaceId === wsId) { setActiveWorkspaceId(null); setActiveConversationId(null); setChatHistory([]); }
       fetchSandboxWorkspaces();
     } catch (e) { console.error('Failed to delete workspace', e); }
@@ -271,10 +288,10 @@ export default function FraidayWorkspace() {
   // Delete conversation
   const deleteSandboxConversation = async (wsId: string, convId: string) => {
     try {
-      await fetch(`http://localhost:8000/api/sandbox/workspaces/${wsId}/conversations/${convId}`, { method: 'DELETE' });
+      await fetch(`http://localhost:8006/api/sandbox/workspaces/${wsId}/conversations/${convId}`, { method: 'DELETE' });
       if (activeConversationId === convId) { setActiveConversationId(null); setChatHistory([]); }
       // Refresh
-      const res = await fetch(`http://localhost:8000/api/sandbox/workspaces/${wsId}/conversations`);
+      const res = await fetch(`http://localhost:8006/api/sandbox/workspaces/${wsId}/conversations`);
       if (res.ok) { const d = await res.json(); setSandboxConversations(d.conversations || []); }
       fetchSandboxWorkspaces();
     } catch (e) { console.error('Failed to delete conversation', e); }
@@ -303,11 +320,11 @@ export default function FraidayWorkspace() {
     setActivityStream(prev => [...prev, activity]);
   };
 
-  const startRun = async () => {
-    if (!inputVal.trim()) return;
+  const startRunWithText = async (objectiveText: string, inputMode: "text" | "voice" = "text") => {
+    if (!objectiveText.trim()) return;
     if (runStatus === 'running' || runStatus === 'starting') return;
     
-    const objective = inputVal;
+    const objective = objectiveText.trim();
     setInputVal("");
 
     // Read attached files as text before clearing
@@ -345,7 +362,7 @@ export default function FraidayWorkspace() {
     setErrorInfo(null);
     
     try {
-      const res = await fetch('http://localhost:8000/api/runs/', {
+      const res = await fetch('http://localhost:8006/api/runs/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -354,6 +371,7 @@ export default function FraidayWorkspace() {
           provider,
           workspace_id: activeWorkspaceId,
           conversation_id: activeConversationId,
+          input_mode: inputMode,
           attachments: fileAttachments.length > 0 ? fileAttachments : undefined
         })
       });
@@ -364,7 +382,7 @@ export default function FraidayWorkspace() {
       setRunStatus('running');
       
       let latestChatText = '';
-      const evtSource = new EventSource(`http://localhost:8000/api/runs/${data.run_id}/events`);
+      const evtSource = new EventSource(`http://localhost:8006/api/runs/${data.run_id}/events`);
       
       evtSource.onmessage = async (event) => {
         try {
@@ -496,7 +514,7 @@ export default function FraidayWorkspace() {
             
             let finalState: any = {};
             try {
-              const finalRes = await fetch(`http://localhost:8000/api/runs/${data.run_id}`);
+              const finalRes = await fetch(`http://localhost:8006/api/runs/${data.run_id}`);
               if (finalRes.ok) {
                 const finalData = await finalRes.json();
                 finalState = finalData.state || {};
@@ -510,7 +528,7 @@ export default function FraidayWorkspace() {
             // Sync contiguous chat history and context memory from backend
             if (activeWorkspaceId && activeConversationId) {
               try {
-                const convRes = await fetch(`http://localhost:8000/api/sandbox/workspaces/${activeWorkspaceId}/conversations/${activeConversationId}`);
+                const convRes = await fetch(`http://localhost:8006/api/sandbox/workspaces/${activeWorkspaceId}/conversations/${activeConversationId}`);
                 if (convRes.ok) {
                   const convData = await convRes.json();
                   if (convData.messages && convData.messages.length > 0) {
@@ -575,6 +593,8 @@ export default function FraidayWorkspace() {
     }
   };
 
+  const startRun = () => startRunWithText(inputVal, "text");
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -635,7 +655,7 @@ export default function FraidayWorkspace() {
               className={`px-2 py-0.5 border-2 border-black text-[10px] font-black flex items-center space-x-1 shadow-brutal-sm transition-all ${previewOpen ? 'bg-black text-fra-yellow' : 'bg-fra-yellow text-black hover:bg-yellow-400'}`}
             >
               <span>{previewOpen ? 'Hide Browser Preview' : 'Open Browser Preview'}</span>
-              <span>↗</span>
+              <span>Γåù</span>
             </button>
           )}
         </nav>
@@ -750,7 +770,7 @@ export default function FraidayWorkspace() {
                         </span>
                         <span className="text-[8px] bg-neutral-800 text-neutral-400 px-1 rounded">{ws.conversation_count}</span>
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteSandboxWorkspace(ws.id); }} className="text-[9px] text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 font-bold ml-1 px-1">✕</button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteSandboxWorkspace(ws.id); }} className="text-[9px] text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 font-bold ml-1 px-1">Γ£ò</button>
                     </div>
                     {activeWorkspaceId === ws.id && (
                       <div className="pl-4 py-1 space-y-0.5">
@@ -759,7 +779,7 @@ export default function FraidayWorkspace() {
                             <span className="truncate" onClick={() => loadConversation(ws.id, conv.id)}>{conv.title}</span>
                             <div className="flex items-center space-x-1">
                               <span className="text-[8px] text-neutral-600">{conv.message_count}</span>
-                              <button onClick={(e) => { e.stopPropagation(); deleteSandboxConversation(ws.id, conv.id); }} className="text-[9px] text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 font-bold">✕</button>
+                              <button onClick={(e) => { e.stopPropagation(); deleteSandboxConversation(ws.id, conv.id); }} className="text-[9px] text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 font-bold">Γ£ò</button>
                             </div>
                           </div>
                         ))}
@@ -909,10 +929,10 @@ export default function FraidayWorkspace() {
                   {/* Current active run UI for execution workflows */}
                   {(runStatus !== 'idle') && runType === 'execution' && (
                     <div className="flex items-start max-w-4xl">
-                      <div className="w-8 h-8 rounded bg-black flex-shrink-0 mr-3 flex items-center justify-center text-white font-bold text-sm">F_</div>
+                      <div className="w-8 h-8 rounded bg-black flex-shrink-0 mr-3 flex items-center justify-center text-white font-bold text-sm">J_</div>
                       <div className="flex-1 space-y-4">
                         
-                        {/* Inline preview placeholder removed — preview is now in split pane */}
+                        {/* Inline preview placeholder removed ΓÇö preview is now in split pane */}
 
                         {/* Antigravity-Style Thoughts View */}
                         <ThinkingView
@@ -1002,7 +1022,7 @@ export default function FraidayWorkspace() {
                                     }}
                                     className="bg-fra-yellow text-black border-2 border-black px-3 py-1.5 text-xs font-bold shadow-brutal-sm hover:bg-black hover:text-white transition-colors flex items-center space-x-2"
                                   >
-                                    <span>Open in Live Browser Preview ↗</span>
+                                    <span>Open in Live Browser Preview Γåù</span>
                                   </button>
                                 </div>
                               )}
@@ -1023,7 +1043,7 @@ export default function FraidayWorkspace() {
                                         title={`Preview ${a.path}`}
                                       >
                                         <span>{a.path}</span>
-                                        <span className="text-[8px] text-neutral-500">↗</span>
+                                        <span className="text-[8px] text-neutral-500">Γåù</span>
                                       </button>
                                     ))}
                                   </div>
@@ -1111,12 +1131,12 @@ export default function FraidayWorkspace() {
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       {attachedFiles.map((file, idx) => (
                         <div key={idx} className="flex items-center space-x-1 bg-neutral-100 border border-neutral-300 px-2 py-1 text-[10px] font-mono font-bold">
-                          <span className="text-neutral-500">📎</span>
+                          <span className="text-neutral-500">≡ƒôÄ</span>
                           <span className="truncate max-w-[120px]">{file.name}</span>
                           <button
                             onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
                             className="text-red-400 hover:text-red-600 font-black ml-1"
-                          >✕</button>
+                          >Γ£ò</button>
                         </div>
                       ))}
                     </div>
@@ -1149,6 +1169,46 @@ export default function FraidayWorkspace() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <span className="text-[10px] text-neutral-500 font-mono hidden sm:inline">Enter to send · Shift+Enter for newline</span>
+
+                        {/* Push-to-Talk Voice Button */}
+                        <button
+                          type="button"
+                          disabled={runStatus === 'starting' || runStatus === 'running'}
+                          onMouseDown={() => {
+                            setVoiceOverlayOpen(true);
+                            voice.start();
+                          }}
+                          onMouseUp={() => {
+                            voice.stop();
+                          }}
+                          onTouchStart={() => {
+                            setVoiceOverlayOpen(true);
+                            voice.start();
+                          }}
+                          onTouchEnd={() => {
+                            voice.stop();
+                          }}
+                          onClick={() => {
+                            if (!voiceOverlayOpen) {
+                              setVoiceOverlayOpen(true);
+                              voice.start();
+                            }
+                          }}
+                          className={`px-3 py-1.5 text-xs font-bold font-mono border-2 border-fra-black flex items-center space-x-1.5 shadow-brutal-sm transition-transform active:scale-95 ${
+                            runStatus === 'starting' || runStatus === 'running'
+                              ? 'bg-neutral-300 text-neutral-500 cursor-not-allowed'
+                              : 'bg-fra-yellow hover:bg-fra-yellow-hover text-black cursor-pointer'
+                          }`}
+                          title="Hold to speak (Groq Whisper STT)"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="22"/>
+                          </svg>
+                          <span>VOICE</span>
+                        </button>
+
                         <button 
                           disabled={runStatus === 'starting' || runStatus === 'running'}
                           className={`px-4 py-1.5 text-xs font-bold border-2 border-black flex items-center space-x-1.5 shadow-brutal-sm ${runStatus === 'starting' || runStatus === 'running' ? 'bg-neutral-400 text-neutral-600 cursor-not-allowed' : 'bg-black text-white hover:bg-neutral-800'}`}
@@ -1488,7 +1548,7 @@ export default function FraidayWorkspace() {
                           <span className="text-[9px] bg-neutral-100 border border-neutral-300 px-1 font-bold">ROOT</span>
                         </div>
                         <div className="text-[10px] text-neutral-600 mb-2 truncate" title={workspaceRoot}>
-                          📁 {workspaceRoot}
+                          ≡ƒôü {workspaceRoot}
                         </div>
                         <div className="space-y-1 text-[10px]">
                           {artifacts.length > 0 ? (
@@ -1502,7 +1562,7 @@ export default function FraidayWorkspace() {
                                 className="flex items-center justify-between p-1 border border-neutral-200 bg-neutral-50 hover:bg-fra-yellow/40 cursor-pointer transition-colors"
                               >
                                 <span className="font-bold truncate">{a.path}</span>
-                                <span className="text-[8px] bg-black text-white px-1">PREVIEW ↗</span>
+                                <span className="text-[8px] bg-black text-white px-1">PREVIEW Γåù</span>
                               </div>
                             ))
                           ) : (
@@ -1551,7 +1611,7 @@ export default function FraidayWorkspace() {
                                       }}
                                       className="text-[9px] bg-black text-white px-1 hover:bg-fra-yellow hover:text-black font-bold border border-black"
                                     >
-                                      PREVIEW ↗
+                                      PREVIEW Γåù
                                     </button>
                                   </div>
                                 </div>
@@ -1718,6 +1778,21 @@ export default function FraidayWorkspace() {
         workspaceId={activeWorkspaceId || 'default'}
         onSelect={handleAttachFiles}
       />
+
+      {/* Futuristic JARVIS Glowing HUD Voice Overlay */}
+      <JarvisVoiceOverlay
+        isOpen={voiceOverlayOpen}
+        state={voice.state}
+        level={voice.level}
+        onClose={() => {
+          voice.stop();
+          setVoiceOverlayOpen(false);
+        }}
+        onRelease={() => {
+          voice.stop();
+        }}
+      />
     </>
   );
 }
+

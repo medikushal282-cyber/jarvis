@@ -44,7 +44,7 @@ export const BrowserPreview: React.FC<BrowserPreviewProps> = ({
           wsId = parts[3];
         }
       } catch (e) {}
-      dest = `http://localhost:8000/api/preview/${wsId}/${dest}`;
+      dest = `http://localhost:8006/api/preview/${wsId}/${dest}`;
     }
     setCurrentUrl(dest);
     setInputUrl(dest);

@@ -354,7 +354,13 @@ def get_workspace_manager(workspace_id: str = None) -> WorkspaceManager:
         app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         backend_dir = os.path.dirname(app_dir)
         repo_root = os.path.dirname(backend_dir)
-        sandbox_dir = os.path.join(repo_root, "sandbox", workspace_id)
-        os.makedirs(sandbox_dir, exist_ok=True)
-        _workspace_managers[workspace_id] = WorkspaceManager(root_path=sandbox_dir, workspace_id=workspace_id)
+        
+        env_root = os.environ.get("JARVIS_WORKSPACE_ROOT") or os.environ.get("FRAIDAY_WORKSPACE_ROOT")
+        if workspace_id in [None, "default", "ws_default"]:
+            target_root = env_root or repo_root
+        else:
+            target_root = os.path.join(repo_root, "sandbox", workspace_id)
+            
+        os.makedirs(target_root, exist_ok=True)
+        _workspace_managers[workspace_id] = WorkspaceManager(root_path=target_root, workspace_id=workspace_id or "ws_default")
     return _workspace_managers[workspace_id]
