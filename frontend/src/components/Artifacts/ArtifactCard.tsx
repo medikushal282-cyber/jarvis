@@ -1,71 +1,106 @@
-import React from 'react';
-import { 
-  FileText, ImageIcon, FileCode, Table, 
-  Film, FileQuestion, Download, Eye 
-} from './Icons';
-import { ArtifactData } from './ArtifactViewerModal';
+"use client";
 
-interface ArtifactCardProps {
-  artifact: ArtifactData;
-  onPreview: (artifact: ArtifactData) => void;
-  compact?: boolean;
+/**
+ * A compact card for something JARVIS produced: what it is, how big, and
+ * two actions -- open it here, or download it. Built from `ArtifactView`,
+ * which never carries a filesystem path.
+ */
+
+import React from "react";
+
+import { API_BASE } from "@/lib/runtime/client";
+import type { ArtifactView } from "@/lib/runtime/runReducer";
+
+const absolute = (url: string) => (url.startsWith("/") ? `${API_BASE}${url}` : url);
+
+export function formatBytes(n: number): string {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, compact = false }) => {
-  const getIcon = () => {
-    switch (artifact.viewer_type) {
-      case 'image': return <ImageIcon className="w-4 h-4 text-emerald-400" />;
-      case 'pdf': return <FileText className="w-4 h-4 text-rose-400" />;
-      case 'csv': return <Table className="w-4 h-4 text-amber-400" />;
-      case 'code':
-      case 'json': return <FileCode className="w-4 h-4 text-sky-400" />;
-      case 'markdown':
-      case 'text': return <FileText className="w-4 h-4 text-indigo-400" />;
-      case 'video': return <Film className="w-4 h-4 text-purple-400" />;
-      default: return <FileQuestion className="w-4 h-4 text-zinc-400" />;
-    }
-  };
+const KIND_BY_EXT: Record<string, string> = {
+  html: "HTML", htm: "HTML", png: "IMG", jpg: "IMG", jpeg: "IMG", gif: "IMG", svg: "IMG", webp: "IMG",
+  pdf: "PDF", csv: "CSV", json: "JSON", md: "MD", txt: "TXT",
+  py: "CODE", js: "CODE", ts: "CODE", tsx: "CODE", jsx: "CODE", css: "CODE", java: "CODE", go: "CODE",
+  pptx: "DECK", docx: "DOC", xlsx: "SHEET", zip: "ZIP",
+};
 
-  const formatSize = (bytes: number) => {
-    if (!bytes || bytes === 0) return '0 B';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+function kindOf(a: ArtifactView): string {
+  if (!a.downloadUrl && a.url && /^https?:/i.test(a.url)) return "LINK";
+  const ext = a.filename.split(".").pop()?.toLowerCase() ?? "";
+  if (KIND_BY_EXT[ext]) return KIND_BY_EXT[ext];
+  if (a.mimeType?.startsWith("image/")) return "IMG";
+  if (a.mimeType?.startsWith("text/")) return "TXT";
+  return "FILE";
+}
+
+const ACTION_TEXT: Record<string, string> = {
+  created: "created",
+  modified: "edited",
+  deleted: "deleted",
+};
+
+interface ArtifactCardProps {
+  artifact: ArtifactView;
+  onOpen: (artifact: ArtifactView) => void;
+}
+
+const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onOpen }) => {
+  const kind = kindOf(artifact);
+  const deleted = artifact.action === "deleted";
+  const meta = [formatBytes(artifact.size), artifact.action ? ACTION_TEXT[artifact.action] ?? artifact.action : ""]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div
-      onClick={() => onPreview(artifact)}
-      className="group inline-flex items-center space-x-2.5 px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800/90 border border-zinc-800 hover:border-zinc-700 rounded-xl cursor-pointer transition-all duration-150 shadow-sm select-none"
-      title={`Click to preview ${artifact.filename}`}
+      className={`inline-flex w-60 flex-col gap-1.5 border-2 border-black bg-white p-2 font-mono shadow-brutal-sm ${
+        deleted ? "opacity-60" : ""
+      }`}
     >
-      <div className="p-1 rounded-md bg-zinc-800/80 border border-zinc-700/40 group-hover:scale-105 transition">
-        {getIcon()}
-      </div>
-
-      <div className="flex flex-col text-left truncate">
-        <span className="text-xs font-semibold text-zinc-200 group-hover:text-cyan-400 transition truncate max-w-[200px] sm:max-w-xs">
+      <div className="flex items-center gap-2">
+        <span className="flex-shrink-0 border border-black bg-fra-yellow px-1 text-[9px] font-extrabold">{kind}</span>
+        <span className="truncate text-[12px] font-bold text-black" title={artifact.filename}>
           {artifact.filename}
         </span>
-        <span className="text-[10px] font-mono text-zinc-400">
-          {formatSize(artifact.size)}
-        </span>
       </div>
-
-      <div className="flex items-center space-x-1 pl-1 text-zinc-400 group-hover:text-zinc-200">
-        <div className="p-1 rounded hover:bg-zinc-700/60 transition" title="Preview">
-          <Eye className="w-3.5 h-3.5" />
+      {meta && <div className="text-[10px] text-neutral-500">{meta}</div>}
+      {!deleted && (
+        <div className="flex gap-1.5">
+          {artifact.previewable && artifact.url && (
+            <button
+              type="button"
+              onClick={() => onOpen(artifact)}
+              className="border border-black bg-black px-2 py-0.5 text-[10px] font-bold text-white hover:bg-neutral-800"
+            >
+              Open
+            </button>
+          )}
+          {artifact.downloadUrl && (
+            <a
+              href={absolute(artifact.downloadUrl)}
+              download={artifact.filename}
+              className="border border-black bg-white px-2 py-0.5 text-[10px] font-bold text-black hover:bg-fra-yellow"
+            >
+              Download
+            </a>
+          )}
+          {!artifact.previewable && !artifact.downloadUrl && artifact.url && (
+            <a
+              href={absolute(artifact.url)}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="border border-black bg-white px-2 py-0.5 text-[10px] font-bold text-black hover:bg-fra-yellow"
+            >
+              Visit
+            </a>
+          )}
         </div>
-        <a
-          href={`http://localhost:8006${artifact.download_url}`}
-          download={artifact.filename}
-          onClick={(e) => e.stopPropagation()}
-          className="p-1 rounded hover:bg-zinc-700/60 text-zinc-400 hover:text-cyan-400 transition"
-          title="Download"
-        >
-          <Download className="w-3.5 h-3.5" />
-        </a>
-      </div>
+      )}
     </div>
   );
 };
+
+export default ArtifactCard;

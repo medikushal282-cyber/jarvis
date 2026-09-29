@@ -243,6 +243,11 @@ class RunService:
             events = stream.history(0) or self.runs.read_events(run.id, run.workspace_id)
             builder.add_all(events)
             result = builder.build()
+            # Keep this run's version of each produced file, even if a later
+            # run overwrites the original.
+            from app.runtime.results.artifacts import capture
+
+            result = capture(result, run.workspace_id, self.runs.artifacts_dir(run.workspace_id, run.id))
 
             run.event_count = result.get("event_count", 0)
             run.ended_at = utc_now()

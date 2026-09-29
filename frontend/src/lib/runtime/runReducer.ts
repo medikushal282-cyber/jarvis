@@ -57,6 +57,7 @@ export interface ArtifactView {
   size: number;
   /** Relative to the API base, e.g. /api/runs/run_x/artifacts/art_y. */
   url: string | null;
+  downloadUrl: string | null;
   previewable: boolean;
   action?: string;
 }
@@ -215,30 +216,42 @@ function errorText(err: unknown): string {
 
 const PREVIEWABLE = /^(text\/|image\/|application\/(json|pdf))/;
 
-/** The public contract from `artifact_created` (INTERFACES.md 3.6). */
+function downloadFor(url: string | null): string | null {
+  return url ? `${url}${url.includes("?") ? "&" : "?"}download=1` : null;
+}
+
+/**
+ * The public contract from `artifact_created` (INTERFACES.md 3.6). The tool
+ * layer's registry sends `url` / `download_url`; the contract says
+ * `secure_url`. Both are accepted.
+ */
 function fromAnnounced(data: Record<string, any>): ArtifactView | null {
   const id = data.artifact_id;
   if (!id) return null;
+  const url = data.secure_url ?? data.url ?? null;
   return {
     id,
     filename: data.filename ?? id,
     mimeType: data.mime_type ?? null,
     size: Number(data.size ?? 0),
-    url: data.secure_url ?? null,
+    url,
+    downloadUrl: data.download_url ?? downloadFor(url),
     previewable: Boolean(data.preview_supported),
   };
 }
 
-/** A RunResult artifact, from `/api/runs/{id}/result`. */
+/** An artifact from `/api/runs/{id}/result` or a saved turn. */
 export function fromResultArtifact(a: Artifact): ArtifactView {
-  const mime = a.mime ?? null;
+  const mime = a.mime_type ?? a.mime ?? null;
+  const url = a.type === "url" ? a.url ?? null : a.secure_url ?? a.preview_url ?? null;
   return {
-    id: a.id,
-    filename: a.name,
+    id: a.artifact_id ?? a.id,
+    filename: a.filename ?? a.name,
     mimeType: mime,
-    size: a.bytes ?? 0,
-    url: a.type === "url" ? a.url ?? null : a.preview_url ?? null,
-    previewable: a.type === "url" || (mime ? PREVIEWABLE.test(mime) : false),
+    size: a.size ?? a.bytes ?? 0,
+    url,
+    downloadUrl: a.type === "url" ? null : a.download_url ?? downloadFor(url),
+    previewable: a.preview_supported ?? (a.type === "url" || (mime ? PREVIEWABLE.test(mime) : false)),
     action: a.action,
   };
 }

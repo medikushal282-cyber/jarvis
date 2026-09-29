@@ -89,7 +89,17 @@ def main() -> int:
         frame = page.locator("iframe")
         src = frame.first.get_attribute("src") if frame.count() else ""
         check("preview opened on the artifact URL", "/artifacts/" in (src or ""), src or "no iframe")
-        check("artifact card listed", page.get_by_role("button", name="index.html").count() > 0)
+        main = page.locator("main")
+        check("artifact card shows kind and name",
+              main.get_by_text("HTML", exact=True).count() > 0 and main.get_by_text("index.html").count() > 0)
+        download = main.get_by_role("link", name="Download").first
+        href = download.get_attribute("href") if download.count() else ""
+        check("download link is a download of the run's copy",
+              bool(href) and "/artifacts/" in href and href.endswith("download=1"), href or "none")
+        main.get_by_role("button", name="Open").first.click()
+        page.wait_for_timeout(800)
+        src = page.locator("iframe").first.get_attribute("src") or ""
+        check("Open shows the artifact in the preview pane", "/artifacts/" in src, src)
         check("no artifact card named after a raw URL", "/api/runs/" not in page.locator("main").inner_text())
         check("sidebar lists the workspace the run created",
               "No workspaces yet" not in page.locator("aside").inner_text())
@@ -116,7 +126,9 @@ def main() -> int:
         body = page.inner_text("body")
         check("history restored after reload",
               "What is 2 + 2?" in body and "Create an ecommerce website" in body)
-        check("past run keeps its artifact", page.get_by_role("button", name="index.html").count() > 0)
+        check("past run keeps its artifact card",
+              page.locator("main").get_by_text("index.html").count() > 0
+              and page.locator("main").get_by_role("link", name="Download").count() > 0)
 
         # Workers panel: add, test, pause, reorder, remove. Keys never shown.
         key = "gsk_" + "e2e" * 12 + "WXYZ"

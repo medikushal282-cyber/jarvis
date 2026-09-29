@@ -96,18 +96,29 @@ export interface RunSummary {
 
 // --- results ----------------------------------------------------------------
 
+/**
+ * An artifact as the API publishes it: the public contract (INTERFACES.md
+ * 3.6) plus display fields. Never carries a filesystem path.
+ */
 export interface Artifact {
   id: string;
   type: "file" | "url" | "image" | "data";
   name: string;
   action: "created" | "modified" | "deleted";
-  path?: string;
   url?: string;
   bytes: number;
   mime?: string | null;
   created_at?: string | null;
   preview_url?: string;
   run_id?: string;
+  // Public contract fields
+  artifact_id?: string;
+  filename?: string;
+  mime_type?: string | null;
+  size?: number;
+  preview_supported?: boolean;
+  secure_url?: string | null;
+  download_url?: string | null;
 }
 
 export interface ActionSummary {

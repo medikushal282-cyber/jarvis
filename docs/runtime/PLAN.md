@@ -27,7 +27,7 @@ back to `core` needs no UI change.
 | 1 | One event flow in the frontend | **Done** |
 | 2 | Permissions and Turbo | Next — needs 3.5 sign-off from Nikunj and Lohit |
 | 3 | Worker panel and switching | **Done** |
-| 4 | Artifacts and preview | |
+| 4 | Artifacts and preview | **Done** |
 | 5 | Voice end to end | |
 | 6 | Acceptance tests | |
 
@@ -94,7 +94,18 @@ run through `scripts/e2e_backend.py`, which isolates the worker file.
 - Live status: READY / COOLDOWN / ERROR / DISABLED.
 - `worker_switching` shown inline as "Switching worker… continuing".
 
-## Phase 4 — Artifacts and preview
+## Phase 4 — Artifacts and preview (done)
+
+Shipped: one compact artifact card (kind, name, size, Open / Download)
+replacing three overlapping components. Produced files are located wherever
+the tools wrote them (sandbox folder or the tool workspace root, containment
+checked), and a copy is captured into the run folder when the run ends, so a
+later overwrite does not change what the run shows. Every API response goes
+through `public_result` / `public_artifact`: no filesystem paths. Artifacts
+announced by the tool registry (`url`/`download_url`) merge with the file
+event into one card. 9 backend tests, 2 reducer tests, 27 browser checks.
+Blocked on others: the filesystem tool's `artifact_created` never arrives
+(INTERFACES.md section 6).
 
 - One artifact card, driven by `artifact_created`, replacing the three
   overlapping components.

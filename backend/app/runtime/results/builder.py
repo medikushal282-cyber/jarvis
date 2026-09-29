@@ -320,7 +320,65 @@ class ResultBuilder:
             if existing["action"] == "deleted":
                 existing["action"] = action
             return
+        # A tool may announce a file before its file event arrives: join them.
+        announced = self._announced_without_path(posixpath.basename(path))
+        if announced is not None:
+            announced["path"] = path
+            if size:
+                announced["bytes"] = size
+            self._artifacts[path] = announced
+            return
         self._add_artifact(path, action, size, ts)
+
+    def _announced_without_path(self, name: str) -> Optional[Dict[str, Any]]:
+        for entry in self._artifacts.values():
+            if entry.get("announced") and not entry.get("path") and entry.get("name") == name:
+                return entry
+        return None
+
+    def _on_artifact_created(self, data: dict, ts: Optional[str]) -> None:
+        """A tool registered a file it produced (INTERFACES.md 3.6).
+
+        One file, one card: if the same file already arrived through a file
+        event, the announcement is merged into it (its id and URL win).
+        """
+        aid = data.get("artifact_id")
+        if not aid:
+            return
+        name = str(data.get("filename") or aid)
+        url = data.get("secure_url") or data.get("url")
+        mime = data.get("mime_type")
+        size = int(data.get("size") or 0)
+        announced = {
+            "announced": True,
+            "preview_url": url,
+            "download_url": data.get("download_url"),
+        }
+
+        for entry in self._artifacts.values():
+            if entry["id"] == aid:
+                entry.update({k: v for k, v in announced.items() if v is not None})
+                return
+
+        for entry in self._artifacts.values():
+            if entry.get("type") in ("file", "image") and not entry.get("announced") and entry.get("name") == name:
+                entry.update(id=aid, **{k: v for k, v in announced.items() if v is not None})
+                entry["mime"] = mime or entry.get("mime")
+                entry["bytes"] = size or entry.get("bytes", 0)
+                return
+
+        key = f"announced:{aid}"
+        self._artifacts[key] = {
+            "id": aid,
+            "type": "image" if (mime or "").startswith("image/") else "file",
+            "name": name,
+            "action": "created",
+            "bytes": size,
+            "mime": mime,
+            "created_at": ts,
+            **announced,
+        }
+        self._artifact_order.append(key)
 
     def _add_artifact(
         self,
@@ -435,6 +493,7 @@ class ResultBuilder:
         catalog.LEGACY_BROWSER_OPENED: _on_browser_action,
         catalog.TOOL_COMPLETED: _on_tool_completed,
         catalog.TOOL_FAILED: _on_tool_failed,
+        catalog.ARTIFACT_CREATED: _on_artifact_created,
         catalog.MEMORY_RECALLED: _on_memory_recalled,
         catalog.MEMORY_APPLIED: _on_memory_applied,
         catalog.MEMORY_RECORDED: _on_memory_recorded,

@@ -8,6 +8,7 @@
 
 import React from "react";
 
+import ArtifactCard from "@/components/Artifacts/ArtifactCard";
 import LatticeLoader from "@/components/LatticeLoader";
 import type { ArtifactView, ProgressStep, RunView } from "@/lib/runtime/runReducer";
 
@@ -31,13 +32,6 @@ const PHASE_CHIP: Record<RunView["phase"], { text: string; cls: string } | null>
   failed: { text: "FAILED", cls: "bg-red-500 text-white" },
   cancelled: { text: "STOPPED", cls: "bg-neutral-500 text-white" },
 };
-
-export function formatBytes(n: number): string {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 const RunBlock: React.FC<RunBlockProps> = ({
   view,
@@ -205,20 +199,9 @@ export const ArtifactList: React.FC<{
   artifacts: ArtifactView[];
   onOpen: (artifact: ArtifactView) => void;
 }> = ({ artifacts, onOpen }) => (
-  <div className="flex flex-wrap gap-1.5">
+  <div className="flex flex-wrap gap-2">
     {artifacts.map((a) => (
-      <button
-        key={a.id}
-        type="button"
-        onClick={() => onOpen(a)}
-        disabled={!a.url}
-        title={a.previewable ? `Preview ${a.filename}` : `Download ${a.filename}`}
-        className="flex items-center gap-1.5 border border-neutral-300 bg-neutral-50 px-2 py-1 text-[11px] font-bold text-neutral-800 shadow-sm transition-colors hover:border-black hover:bg-fra-yellow disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <span>{a.filename}</span>
-        {a.size > 0 && <span className="text-[9px] font-normal text-neutral-500">{formatBytes(a.size)}</span>}
-        <span className="text-[9px] text-neutral-500" aria-hidden="true">{a.previewable ? "↗" : "↓"}</span>
-      </button>
+      <ArtifactCard key={a.id} artifact={a} onOpen={onOpen} />
     ))}
   </div>
 );

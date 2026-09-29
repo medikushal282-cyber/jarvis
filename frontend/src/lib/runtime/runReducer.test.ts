@@ -244,6 +244,36 @@ describe("workers, as the current gateway reports them", () => {
   });
 });
 
+describe("artifacts announced by the tool layer's registry", () => {
+  it("accepts url / download_url in place of secure_url", () => {
+    seq = 0;
+    const view = play(
+      ev("artifact_created", {
+        artifact_id: "art_reg1", filename: "report.pdf", mime_type: "application/pdf", size: 2048,
+        url: "/api/artifacts/art_reg1/content", download_url: "/api/artifacts/art_reg1/download",
+        preview_supported: true, viewer_type: "pdf",
+      }),
+    );
+    expect(view.artifacts[0]).toMatchObject({
+      id: "art_reg1",
+      url: "/api/artifacts/art_reg1/content",
+      downloadUrl: "/api/artifacts/art_reg1/download",
+      previewable: true,
+    });
+  });
+
+  it("derives a download link for the runtime's own artifact URLs", () => {
+    seq = 0;
+    const view = play(
+      ev("artifact_created", {
+        artifact_id: "art_1", filename: "index.html", mime_type: "text/html", size: 1,
+        preview_supported: true, secure_url: "/api/runs/run_test/artifacts/art_1",
+      }),
+    );
+    expect(view.artifacts[0].downloadUrl).toBe("/api/runs/run_test/artifacts/art_1?download=1");
+  });
+});
+
 describe("artifacts from the final result", () => {
   it("merge with announced ones without duplicates", () => {
     seq = 0;
