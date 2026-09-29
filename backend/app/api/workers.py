@@ -20,11 +20,13 @@ class WorkerUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     reset_cooldown: Optional[bool] = False
 
+@router.get("")
 @router.get("/")
 def list_workers():
     # Never returns raw API keys
     return get_public_workers()
 
+@router.post("")
 @router.post("/")
 def create_worker(data: WorkerCreateRequest):
     new_w = add_worker(data.model_dump())
@@ -45,3 +47,28 @@ def remove_worker(worker_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Worker not found")
     return {"success": True}
+
+class WorkerTestRequest(BaseModel):
+    provider: str
+    model: str
+    api_key: str
+
+@router.post("/test")
+def test_worker_connection(data: WorkerTestRequest):
+    import os
+    from app.llm.router import call_litellm
+    prov = data.provider.lower()
+    env_key = f"{prov.upper()}_API_KEY"
+    old_key = os.environ.get(env_key)
+    try:
+        os.environ[env_key] = data.api_key.strip()
+        call_litellm("Test prompt", "hello", model=data.model, provider=prov)
+        return {"success": True, "message": "Connection successful"}
+    except Exception:
+        return {"success": False, "message": "Connection failed"}
+    finally:
+        if old_key is not None:
+            os.environ[env_key] = old_key
+        elif env_key in os.environ:
+            del os.environ[env_key]
+

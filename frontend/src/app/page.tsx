@@ -681,12 +681,13 @@ export default function FraidayWorkspace() {
         </nav>
 
         <div className="flex items-center space-x-3">
+          <WorkerPoolControl />
           <div className="relative">
             <button className="flex items-center space-x-2 border-2 border-fra-black bg-fra-cream-card px-2.5 py-1 text-[11px] font-bold shadow-brutal hover:bg-fra-yellow transition-colors" onClick={() => setWorkspaceMenuOpen(!workspaceMenuOpen)}>
               <span className="text-xs font-mono font-black">[WS]</span>
               <div className="flex flex-col text-left leading-none">
                 <span className="text-[9px] font-mono uppercase text-neutral-500 font-bold">WORKSPACE</span>
-                <span>{workspace} v</span>
+                <span>{workspace} ▾</span>
               </div>
             </button>
             {workspaceMenuOpen && (
