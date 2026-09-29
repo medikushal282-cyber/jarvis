@@ -27,6 +27,14 @@ ROOT = Path(__file__).parent.parent
 BACKEND = ROOT / "backend"
 TESTS = ROOT / "tests"
 
+try:
+    from dotenv import load_dotenv
+    if (ROOT / ".env").exists():
+        load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Test suites to run (relative to ROOT)
 # ---------------------------------------------------------------------------

@@ -281,7 +281,6 @@ def call_litellm(
     provider: str = "groq",
     tools: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    import litellm
     prov = (provider or "groq").lower()
     model_str = model or "openai/gpt-oss-120b"
 
@@ -310,7 +309,28 @@ def call_litellm(
         kwargs["tool_choice"] = "auto"
 
     try:
-        response = litellm.completion(**kwargs)
+        if prov == "groq":
+            try:
+                groq_model = model_str.replace("groq/", "")
+                client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+                groq_kwargs: Dict[str, Any] = {
+                    "model": groq_model,
+                    "messages": kwargs["messages"],
+                }
+                if tools:
+                    groq_kwargs["tools"] = tools
+                    groq_kwargs["tool_choice"] = "auto"
+                response = client.chat.completions.create(**groq_kwargs)
+            except Exception as groq_err:
+                try:
+                    import litellm
+                    response = litellm.completion(**kwargs)
+                except Exception:
+                    raise groq_err
+        else:
+            import litellm
+            response = litellm.completion(**kwargs)
+
         
         usage = getattr(response, "usage", None)
         if usage:

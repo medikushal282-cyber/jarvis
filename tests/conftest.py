@@ -37,3 +37,11 @@ if "" in sys.path:
 sys.path.insert(0, root_str)
 sys.path.insert(0, backend_str)
 
+try:
+    from dotenv import load_dotenv
+    _env_path = ROOT / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass
+

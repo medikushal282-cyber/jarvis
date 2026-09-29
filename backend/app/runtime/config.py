@@ -31,6 +31,15 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+try:
+    from dotenv import load_dotenv
+    _env_file = project_root() / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file)
+except ImportError:
+    pass
+
+
 def sandbox_root() -> Path:
     override = os.environ.get("JARVIS_SANDBOX_ROOT")
     root = Path(override).resolve() if override else project_root() / "sandbox"
