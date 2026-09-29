@@ -59,9 +59,28 @@ MEMORY_RECORDED = "memory_recorded"
 
 VERIFICATION_STARTED = "verification_started"
 VERIFICATION_COMPLETED = "verification_completed"
-APPROVAL_REQUESTED = "approval_requested"
-APPROVAL_GRANTED = "approval_granted"
-APPROVAL_REJECTED = "approval_rejected"
+
+# --- Permissions -------------------------------------------------------------
+# Lohit's permission engine decides whether an action needs the user; the run
+# waits on the runtime's approval channel until they answer. See
+# docs/INTERFACES.md section 3.5.
+
+PERMISSION_REQUIRED = "permission_required"
+PERMISSION_GRANTED = "permission_granted"
+PERMISSION_DENIED = "permission_denied"
+
+# Earlier names for the same three events, kept importable.
+APPROVAL_REQUESTED = PERMISSION_REQUIRED
+APPROVAL_GRANTED = PERMISSION_GRANTED
+APPROVAL_REJECTED = PERMISSION_DENIED
+
+# --- Workers and artifacts ----------------------------------------------------
+
+#: Nikunj's worker gateway moved the run to another LLM worker. Same run.
+WORKER_SWITCHING = "worker_switching"
+#: A produced file/preview is ready to show. Payload follows the public
+#: artifact contract (docs/INTERFACES.md section 3.6) -- never a filesystem path.
+ARTIFACT_CREATED = "artifact_created"
 
 # --- Transport-only (runtime emits these, nobody else) ----------------------
 
@@ -85,6 +104,9 @@ LEGACY_TOOL_CALL_STARTED = "tool_call_started"
 LEGACY_TOOL_CALL_COMPLETED = "tool_call_completed"
 LEGACY_BROWSER_OPENED = "browser_opened"
 LEGACY_APPROVAL_REQUIRED = "approval_required"
+LEGACY_APPROVAL_REQUESTED = "approval_requested"
+LEGACY_APPROVAL_GRANTED = "approval_granted"
+LEGACY_APPROVAL_REJECTED = "approval_rejected"
 
 
 TERMINAL_EVENTS: FrozenSet[str] = frozenset(
@@ -108,6 +130,9 @@ LEGACY_EVENTS: FrozenSet[str] = frozenset(
         LEGACY_TOOL_CALL_COMPLETED,
         LEGACY_BROWSER_OPENED,
         LEGACY_APPROVAL_REQUIRED,
+        LEGACY_APPROVAL_REQUESTED,
+        LEGACY_APPROVAL_GRANTED,
+        LEGACY_APPROVAL_REJECTED,
     }
 )
 
@@ -137,9 +162,11 @@ PAYLOAD_KEYS: Dict[str, Set[str]] = {
     MEMORY_APPLIED: {"how"},
     MEMORY_RECORDED: {"experience_id"},
     VERIFICATION_COMPLETED: {"valid"},
-    APPROVAL_REQUESTED: {"tool"},
-    APPROVAL_GRANTED: {"request_id"},
-    APPROVAL_REJECTED: {"request_id"},
+    PERMISSION_REQUIRED: {"request_id", "tool", "permission", "summary"},
+    PERMISSION_GRANTED: {"request_id"},
+    PERMISSION_DENIED: {"request_id"},
+    WORKER_SWITCHING: {"to_worker"},
+    ARTIFACT_CREATED: {"artifact_id", "filename"},
     VOICE_TRANSCRIBED: {"text"},
 }
 
@@ -153,7 +180,8 @@ KNOWN_EVENTS: FrozenSet[str] = frozenset(
         FILE_CREATED, FILE_UPDATED, FILE_DELETED, FILE_READ,
         MEMORY_RECALLED, MEMORY_APPLIED, MEMORY_RECORDED,
         VERIFICATION_STARTED, VERIFICATION_COMPLETED,
-        APPROVAL_REQUESTED, APPROVAL_GRANTED, APPROVAL_REJECTED,
+        PERMISSION_REQUIRED, PERMISSION_GRANTED, PERMISSION_DENIED,
+        WORKER_SWITCHING, ARTIFACT_CREATED,
         STREAM_READY, HEARTBEAT, VOICE_TRANSCRIBED, VOICE_SPOKEN,
     }
     | LEGACY_EVENTS
@@ -161,7 +189,10 @@ KNOWN_EVENTS: FrozenSet[str] = frozenset(
 
 #: Legacy name -> canonical name, applied by the shim.
 LEGACY_ALIASES: Dict[str, str] = {
-    LEGACY_APPROVAL_REQUIRED: APPROVAL_REQUESTED,
+    LEGACY_APPROVAL_REQUIRED: PERMISSION_REQUIRED,
+    LEGACY_APPROVAL_REQUESTED: PERMISSION_REQUIRED,
+    LEGACY_APPROVAL_GRANTED: PERMISSION_GRANTED,
+    LEGACY_APPROVAL_REJECTED: PERMISSION_DENIED,
 }
 
 

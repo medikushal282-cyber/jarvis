@@ -154,6 +154,7 @@ class Run:
     model: str = ""
     provider: str = ""
     input_mode: str = "text"
+    execution_mode: str = "normal"
     status: str = RUN_PENDING
     created_at: str = field(default_factory=utc_now)
     started_at: Optional[str] = None
@@ -179,6 +180,7 @@ class Run:
             "model": self.model,
             "provider": self.provider,
             "input_mode": self.input_mode,
+            "execution_mode": self.execution_mode,
             "status": self.status,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -201,6 +203,7 @@ class Run:
             model=raw.get("model", ""),
             provider=raw.get("provider", ""),
             input_mode=raw.get("input_mode", "text"),
+            execution_mode=raw.get("execution_mode", "normal"),
             status=raw.get("status", RUN_PENDING),
             created_at=raw.get("created_at") or utc_now(),
             started_at=raw.get("started_at"),

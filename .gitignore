@@ -34,3 +34,6 @@ frontend/page_backup*
 frontend/script*
 factorial.py
 main.py
+
+# Worker API keys are stored in plain text here; never commit them.
+backend/data/workers.json

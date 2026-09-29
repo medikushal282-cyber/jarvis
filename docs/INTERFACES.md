@@ -13,7 +13,7 @@ not here, add it here first and tell the owner.
 
 | Layer | Owner | Package | Answers the question |
 | :--- | :--- | :--- | :--- |
-| **Runtime / Edge** | Farhan | `backend/app/runtime/` | How does a human talk to JARVIS, and how do they see what it did? |
+| **Runtime / Edge** | Farhan | `backend/app/runtime/` (the brief's `app/interface/`; kept as `runtime/` because the brain already imports it) | How does a human talk to JARVIS, and how do they see what it did? |
 | **Agent Brain** | Nikunj | `backend/app/agent/` | What should JARVIS do next? |
 | **Tools / Capability** | Lohith | `backend/app/tools/` | How does JARVIS actually touch the computer? |
 | **Memory** | Kushal | `backend/app/memory/` | What does JARVIS remember? |
@@ -84,6 +84,7 @@ class RunRequest:
     model: str
     provider: str
     input_mode: str = "text"                        # "text" | "voice"
+    execution_mode: str = "normal"                  # "normal" | "turbo" -- see 3.5
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     conversation: List[Dict[str, Any]] = field(default_factory=list)  # recent turns
     context_summary: str = ""                       # compressed session memory
@@ -110,6 +111,14 @@ Rules:
   `RunOutcome.reply` is only the spoken or printed sentence.
 - `run()` may block for minutes. It runs in its own task; do not sleep the
   event loop, use `asyncio.to_thread` for sync work.
+
+**Testing against the contract without the others:** `JARVIS_AGENT=scripted`
+swaps in `runtime/adapters/scripted.py`, a fake brain that emits the full event
+vocabulary (memory, tools, a worker switch, a real artifact, verification) with
+no LLM. The objective picks the scenario: a question, "missing" (a tool fails),
+"crash" (the brain raises), or anything else (builds and previews a site). Use
+it to check your UI or event handling; replace it with the real thing by
+switching back to `core`.
 
 ### 3.2 `EventEmitter` — Brain/Tools to Runtime
 
@@ -150,7 +159,8 @@ class ToolExecutor(Protocol):
         ...
 ```
 
-`ToolContext` carries `run_id`, `session_id`, `user_id`, `workspace_root`, and
+`ToolContext` carries `run_id`, `session_id`, `user_id`, `workspace_root`,
+`permissions`, `execution_mode` (copied from the run request, see 3.5), and
 an optional `emit` for tools that stream progress (a long `run_command`, a
 browser session). A tool that is handed `emit` may only send `tool_progress`,
 `command_output`, and `browser_action`.
@@ -181,6 +191,70 @@ class MemoryProvider(Protocol):
 The brain emits `memory_recalled` after `recall()` and `memory_recorded` after
 `record()` so the UI can show the memory layer working. That event is how
 Hindsight becomes visible to a judge — see [EVENTS.md](runtime/EVENTS.md).
+
+### 3.5 Permissions and Turbo — Tools, Brain and Runtime together
+
+> **Status: proposed.** Needs Nikunj and Lohit to agree before Farhan builds
+> Phase 2 on it.
+
+Three owners, three separate jobs:
+
+| Who | Job |
+| :--- | :--- |
+| Lohit (permission engine) | Decides **whether** an action needs the user, given the tool's permission, the user's configured permissions and `execution_mode`. |
+| Farhan (runtime approval channel) | Carries the question to the user and the answer back, **inside the same run**. |
+| Nikunj (agent loop) | Waits for the answer, then executes or tells the model the action was refused. |
+
+When the engine says approval is needed, the run does **not** end. It waits:
+
+```python
+decision = await approvals.request(ctx, {
+    "tool": "run_command",
+    "permission": "terminal.execute",
+    "summary": "Execute npm install",
+    "risk": "medium",                      # "low" | "medium" | "high"
+})
+# -> emits permission_required {request_id, tool, permission, summary, risk}
+# -> run status becomes "paused" while waiting
+# -> POST /api/runs/{run_id}/permissions/{request_id} {"decision": "approve"|"deny"}
+# -> emits permission_granted or permission_denied, returns the decision
+# -> no answer within the timeout counts as "deny"
+```
+
+**Turbo** is only an input to the engine: `execution_mode = "turbo"` lets it
+skip the prompt for actions the user's configured permissions already cover.
+It never means "allow everything"; hard restrictions stay blocked in both
+modes.
+
+### 3.6 Artifacts — Tools to Runtime to UI
+
+Lohit's tools produce files; the runtime serves them; the UI shows them. What
+reaches the browser (the `artifact_created` event and the API) is only this:
+
+```json
+{
+  "artifact_id": "art_3f9c2a1b7d04",
+  "filename": "index.html",
+  "mime_type": "text/html",
+  "size": 4821,
+  "preview_supported": true,
+  "secure_url": "/api/runs/run_9f3c21a8/artifacts/art_3f9c2a1b7d04"
+}
+```
+
+- **No filesystem paths** in anything the browser receives.
+- `artifact_id` is deterministic: `stable_artifact_id(run_id, relative_path)`
+  in `runtime/ids.py`. The same file in the same run always gets the same id,
+  so a link handed out mid-run keeps working.
+- `secure_url` is served by the runtime, which re-checks that the file is
+  inside the run's workspace before returning it.
+
+### 3.7 Worker switching — Brain to UI
+
+When Nikunj's gateway moves a run to another LLM worker, it emits
+`worker_switching {from_worker, to_worker, reason, retry_after_s?}` and the
+**same run continues**. The UI shows "Switching worker… continuing", never a
+failure or a restart.
 
 ---
 
@@ -227,5 +301,8 @@ These exist today and are scheduled for removal in Phase 0 to 2 of
 | Run state lives in a module-level dict, lost on restart | `backend/app/api/runs.py:38` | Run store in `runtime/sessions/` |
 | `workflow.py` conflates run lifecycle, transport, and agent logic | `backend/app/graph/workflow.py:80-360` | Lifecycle moves to `runtime/`, the rest stays behind `AgentRunner` |
 | No `user_id` anywhere in the session model | `backend/app/api/sandbox.py` | Added in Phase 2 |
-| Two names for one concept: `approval_requested` vs `approval_required` | `executor.py:604` / `workflow.py:289` | Single name `approval_requested` in the catalog |
+| ~~Two names for one concept: `approval_requested` vs `approval_required`~~ | `executor.py:604` / `workflow.py:289` | **Fixed:** both, and `approval_granted`/`approval_rejected`, now arrive as `permission_required`/`permission_granted`/`permission_denied` |
+| `page.tsx` listens for the old event names (`tool_call_started`, `node_started`, ...) but the brain emits the new ones (`tool_started`, `tool_failed`, `memory_recalled`, `browser_action`), so tool progress never appears | `frontend/src/app/page.tsx` | Farhan, Phase 1 |
+| For the `default` workspace, the agent's working directory is the repository root, so agent output lands in the repo and `sync.bat` commits it | `backend/app/workspace/manager.py` `get_workspace_manager` | Lohit |
+| `ToolContext.has_permission` treats an empty permission list as "allow everything", so destructive tools are not gated (4 `test_capability_layer` tests fail on `main`) | `backend/app/runtime/protocols.py` | Lohit |
 | Workspace ids are unsanitised user input used as filesystem paths | `backend/app/api/sandbox.py:67` | P0 security fix, Phase 2 |

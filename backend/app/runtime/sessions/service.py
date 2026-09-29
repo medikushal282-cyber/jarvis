@@ -88,10 +88,17 @@ class RunService:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         input_mode: str = "text",
+        execution_mode: str = "normal",
         attachments: Optional[List[Dict[str, Any]]] = None,
         audio_url: Optional[str] = None,
     ) -> Run:
         """Steps 1-6. Returns as soon as the run is dispatched."""
+        from app.runtime.protocols import EXECUTION_MODES
+
+        if execution_mode not in EXECUTION_MODES:
+            raise ValueError(
+                f"execution_mode must be one of {sorted(EXECUTION_MODES)}"
+            )
         session = self.ensure_session(
             session_id, workspace_id, user_id, title=objective[:60] or "New Session"
         )
@@ -105,6 +112,7 @@ class RunService:
             model=model or config.DEFAULT_MODEL,
             provider=provider or config.DEFAULT_PROVIDER,
             input_mode=input_mode,
+            execution_mode=execution_mode,
             status=RUN_PENDING,
         )
 
@@ -189,6 +197,7 @@ class RunService:
             model=run.model,
             provider=run.provider,
             input_mode=run.input_mode,
+            execution_mode=run.execution_mode,
             attachments=run.metadata.get("attachments", []),
             conversation=session.recent_turns(6),
             context_summary=session.context_summary,

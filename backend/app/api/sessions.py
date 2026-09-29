@@ -59,6 +59,7 @@ class StartRunRequest(BaseModel):
     model: Optional[str] = None
     provider: Optional[str] = None
     input_mode: str = "text"
+    execution_mode: str = "normal"
     workspace_id: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
     audio_url: Optional[str] = None
@@ -272,6 +273,7 @@ async def start_session_run(session_id: str, req: StartRunRequest, request: Requ
             model=req.model,
             provider=req.provider,
             input_mode=req.input_mode,
+            execution_mode=req.execution_mode,
             attachments=[a.model_dump() for a in (req.attachments or [])],
             audio_url=req.audio_url,
         )

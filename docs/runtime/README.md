@@ -75,44 +75,13 @@ GET  /api/runs/{run_id}/result         RunResult
 
 ## Status
 
-Phases 0-5 are implemented and tested. 84 runtime tests pass; the backend
-suite went from 77 to 161 passing with no regressions.
-
-| Phase | State | Where |
-| :--- | :--- | :--- |
-| 0 Contracts + legacy adapter | done | `runtime/protocols.py`, `runtime/ids.py`, `runtime/adapters/` |
-| 1 Event infrastructure | done | `runtime/events/` |
-| 2 Sessions and persistence | done | `runtime/sessions/`, `api/sessions.py` |
-| 3 Results | done | `runtime/results/builder.py` |
-| 3.4 Artifact capture | **not done** | nothing writes to `runs/<id>/artifacts/` |
-| 4 Voice plumbing | done, unproven | `runtime/voice/`, `api/voice.py` |
-| 5 Frontend client + components | built, **not wired** | `frontend/src/lib/runtime/` |
-
-### Known gaps
-
-1. **Artifact capture is not implemented.** `ARTIFACT_CAPTURE`,
-   `ARTIFACT_MAX_BYTES` and `RunStore.artifacts_dir()` exist, and the serve
-   endpoint looks in the run's artifact directory first -- but nothing ever
-   populates it. Artifacts are path references only, so a file the agent
-   overwrites later in the run loses the version the run produced.
-2. **`voice_transcribed` / `voice_spoken` are never emitted.** They are in the
-   catalog and documented; no code fires them.
-3. **Voice has never run against real audio.** No Groq Whisper round trip has
-   happened, so the model ids in `config.STT_MODEL` are unverified defaults.
-   Confirm them against the live catalog before relying on them.
-4. **Auth is not wired.** `AUTH_SERVICE_URL` is defined and unused;
-   `current_user_id()` trusts an `X-User-Id` header or falls back to
-   `usr_local`. Fine for a single-user demo, not a real identity boundary.
-5. **`page.tsx` does not import any of this.** The client, the voice button
-   and the result panel exist and compile, but nothing renders them -- the app
-   behaves exactly as before. This is the gap that matters most: none of the
-   voice or result work is visible to a user yet.
-
-The shim in `app/events.py` keeps every legacy event flowing, so the existing
-page keeps working untouched.
+See [PLAN.md](PLAN.md) for the current phase and what is left.
 
 Run the tests:
 
 ```bash
 cd backend && python -m pytest tests/test_runtime_*.py -q
 ```
+
+Try the UI without the real brain or an API key: set `JARVIS_AGENT=scripted`
+before starting the backend.

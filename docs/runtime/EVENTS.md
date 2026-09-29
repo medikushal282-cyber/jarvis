@@ -158,16 +158,20 @@ supplies the data, Nikunj emits them.
 happened; `memory_applied` proves it *changed the behaviour*, which is the
 25% judging criterion.
 
-### 4.6 Verification and approval
+### 4.6 Verification, permissions, workers and artifacts
 
 | Event | `data` |
 | :--- | :--- |
 | `verification_started` | `target`, `method` |
 | `verification_completed` | `valid`, `reason`, `checks: [{name, passed, detail}]` |
-| `approval_requested` | `tool`, `path`, `reason`, `request_id` |
-| `approval_granted` / `approval_rejected` | `request_id` |
+| `permission_required` | `request_id`, `tool`, `permission`, `summary`, `risk` — the run is paused ([INTERFACES.md 3.5](../INTERFACES.md)) |
+| `permission_granted` / `permission_denied` | `request_id` |
+| `worker_switching` | `from_worker`, `to_worker`, `reason`, `retry_after_s?` — same run continues |
+| `artifact_created` | `artifact_id`, `filename`, `mime_type`, `size`, `preview_supported`, `secure_url` — never a path ([INTERFACES.md 3.6](../INTERFACES.md)) |
 
-Note: `approval_required` is **retired**. Use `approval_requested`.
+`approval_required`, `approval_requested`, `approval_granted` and
+`approval_rejected` are **retired**. They still arrive, renamed to the
+`permission_*` events above, so older senders keep working.
 
 ### 4.7 Transport-only — emitted by the runtime, never by anyone else
 

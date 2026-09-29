@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.runtime.events import catalog
-from app.runtime.ids import new_artifact_id
+from app.runtime.ids import stable_artifact_id
 
 #: Action kind -> (singular, plural) label templates.
 ACTION_LABELS: Dict[str, tuple] = {
@@ -308,7 +308,7 @@ class ResultBuilder:
         if kind == "file" and mime and any(key.lower().endswith(s) for s in IMAGE_SUFFIXES):
             kind = "image"
         entry = {
-            "id": new_artifact_id(),
+            "id": stable_artifact_id(self.run_id, key),
             "type": kind,
             "name": display,
             "action": action,
