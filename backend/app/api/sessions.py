@@ -476,6 +476,35 @@ def serve_artifact(
     return FileResponse(target, media_type=mime, headers=headers)
 
 
+class PermissionDecision(BaseModel):
+    decision: str  # "approve" | "deny"
+
+
+@runs_router.get("/{run_id}/permissions")
+def pending_permissions(run_id: str):
+    """What this run is waiting on the user for (INTERFACES.md 3.5)."""
+    from app.runtime.approvals import approvals
+
+    return {"run_id": run_id, "pending": approvals.pending_for(run_id)}
+
+
+@runs_router.post("/{run_id}/permissions/{request_id}")
+def decide_permission(run_id: str, request_id: str, body: PermissionDecision):
+    """The user's answer to a permission request. The run resumes in place."""
+    from app.runtime.approvals import approvals
+
+    choice = body.decision.strip().lower()
+    if choice not in ("approve", "allow", "deny", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'deny'")
+    approve = choice in ("approve", "allow")
+    outcome = approvals.resolve(run_id, request_id, approve)
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="No such pending request for this run")
+    if outcome == "decided":
+        raise HTTPException(status_code=409, detail="This request was already answered")
+    return {"run_id": run_id, "request_id": request_id, "decision": "approved" if approve else "denied"}
+
+
 @runs_router.post("/{run_id}/cancel")
 async def cancel_run(run_id: str):
     cancelled = await run_service.cancel(run_id)

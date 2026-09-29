@@ -12,6 +12,10 @@ Select it with ``JARVIS_AGENT=scripted``. The objective picks the scenario:
 * mentions "missing"                    -> a tool fails, the run explains it
 * mentions "crash"                      -> the brain raises; the runtime
                                            turns that into ``run_failed``
+* mentions "install"                    -> asks permission to run a command
+                                           and waits for Allow / Deny; in
+                                           Turbo it is auto-approved, standing
+                                           in for the permission engine
 * anything else                         -> builds a small website, switches
                                            worker mid-run, previews, verifies
 
@@ -26,7 +30,7 @@ import asyncio
 import os
 import re
 
-from app.runtime.ids import new_call_id, stable_artifact_id
+from app.runtime.ids import new_call_id, new_request_id, stable_artifact_id
 from app.runtime.protocols import AgentRunner, EventEmitter, RunOutcome, RunRequest
 
 QUESTION_RE = re.compile(r"^\s*(what|who|why|how|when|where|is|are|can|does|do)\b|\?\s*$", re.I)
@@ -88,6 +92,8 @@ class ScriptedRunner(AgentRunner):
         objective = request.objective.lower()
         if "crash" in objective:
             return await self._crash(request, emit)
+        if "install" in objective:
+            return await self._needs_permission(request, emit)
         if "missing" in objective:
             return await self._missing_file(request, emit)
         if QUESTION_RE.search(request.objective):
@@ -114,6 +120,49 @@ class ScriptedRunner(AgentRunner):
                              "error": {"code": "FILE_NOT_FOUND",
                                        "message": "missing.txt does not exist"}}, node="agent")
         reply = "I couldn't read missing.txt because it doesn't exist in this workspace."
+        emit("run_completed", {"status": "completed", "summary": reply, "reply": reply}, node="agent")
+        return RunOutcome(status="completed", reply=reply)
+
+    async def _needs_permission(self, request: RunRequest, emit: EventEmitter) -> RunOutcome:
+        """A risky action: the approval channel pauses the run for the user."""
+        from app.runtime.approvals import approvals
+
+        command = "npm install"
+        summary = f"Execute {command}"
+        emit("planning", {"objective": request.objective}, node="agent")
+        await _pause()
+        call_id = new_call_id()
+        emit("tool_started", {"tool": "run_command", "call_id": call_id,
+                              "args": {"command": command}}, node="agent")
+
+        if request.execution_mode == "turbo":
+            # What the permission engine does for a pre-authorised capability.
+            approved = True
+            emit("permission_granted", {"request_id": new_request_id(), "reason": "turbo",
+                                        "auto": True, "summary": summary,
+                                        "permission": "terminal.execute"}, node="agent")
+        else:
+            decision = await approvals.request(
+                request.run_id, tool="run_command", permission="terminal.execute",
+                summary=summary, risk="medium",
+            )
+            approved = decision.approved
+
+        if not approved:
+            emit("tool_failed", {"tool": "run_command", "call_id": call_id,
+                                 "error": {"code": "PERMISSION_DENIED",
+                                           "message": "Not run: permission was not given"}}, node="agent")
+            reply = f"OK, I didn't run {command}."
+            emit("run_completed", {"status": "completed", "summary": reply, "reply": reply}, node="agent")
+            return RunOutcome(status="completed", reply=reply)
+
+        emit("command_started", {"command": command}, node="agent")
+        await _pause()
+        emit("command_completed", {"command": command, "exit_code": 0, "duration_ms": 1200,
+                                   "stdout": "added 42 packages"}, node="agent")
+        emit("tool_completed", {"tool": "run_command", "call_id": call_id, "ok": True,
+                                "duration_ms": 1200}, node="agent")
+        reply = "Dependencies installed: 42 packages added."
         emit("run_completed", {"status": "completed", "summary": reply, "reply": reply}, node="agent")
         return RunOutcome(status="completed", reply=reply)
 

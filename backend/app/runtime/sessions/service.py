@@ -94,7 +94,12 @@ class RunService:
         voice: Optional[Dict[str, Any]] = None,
     ) -> Run:
         """Steps 1-6. Returns as soon as the run is dispatched."""
+        from app.runtime.approvals import approvals
         from app.runtime.protocols import EXECUTION_MODES
+
+        # Tools run in worker threads; they reach the approval channel
+        # through this loop.
+        approvals.bind_loop(asyncio.get_running_loop())
 
         if execution_mode not in EXECUTION_MODES:
             raise ValueError(
@@ -230,6 +235,11 @@ class RunService:
         emit,
     ) -> None:
         try:
+            # Nothing may stay waiting for an answer once the run is over.
+            from app.runtime.approvals import approvals
+
+            approvals.cancel_run(run.id)
+
             # The brain may have returned without a terminal event.
             if stream.terminal_event is None and run.status != RUN_CANCELLED:
                 if failure is not None:
