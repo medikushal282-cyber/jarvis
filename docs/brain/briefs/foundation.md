@@ -228,8 +228,8 @@ Runtime pins: `httpx>=0.27,<1`, `PyYAML>=6.0.1,<7`, `jsonschema>=4.22,<5`. Dev, 
 
 ## DEFINITION OF DONE — run each of these and keep the real output
 1. `python -m brain.cli config show --profile devops` prints the resolved config and its fingerprint.
-2. `python -m brain.docs.gen_tools_md` writes `config/tools.md` covering all 23 tools from the 6 tool YAML files.
-3. `python -c "from pathlib import Path; from brain.tools.registry import ToolRegistry; r=ToolRegistry.from_yaml_dir(Path('config/tools')); print(len(r.all()))"` prints `23`.
+2. `python -m brain.docs.gen_tools_md` writes `config/tools.md` covering all 29 tools from the 6 tool YAML files.
+3. `python -c "from pathlib import Path; from brain.tools.registry import ToolRegistry; r=ToolRegistry.from_yaml_dir(Path('config/tools')); print(len(r.all()))"` prints `29`.
 4. All 6 tool YAML files validate against `docs/brain/schemas/tool.schema.json`.
 5. A deliberately broken tool file is rejected with a `ConfigError` naming the field. Write the
    bad file into the system temp directory (`tempfile`), **not** into the repo, and show the error.

@@ -22,7 +22,7 @@ tools:
       resolution for a service, a stated operator preference, an entity fact such as an
       owner or an SLO. Ask a focused question and pass the entities involved; a vague query
       returns vague memories.
-    provider: memory
+    provider: hindsight
     method: recall_memory
     parameters:
       type: object
@@ -79,7 +79,7 @@ tools:
       explicitly, and say what happened and what it implies. Do not save narration of this
       run, restatements of the objective, or anything already in the incident record — the
       RETAIN state handles the ordinary case automatically.
-    provider: memory
+    provider: hindsight
     method: save_memory
     parameters:
       type: object

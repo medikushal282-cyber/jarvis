@@ -646,14 +646,9 @@ class Brain:
             return
 
         entities = self._entities(ctx["config"].objective)
-        query = RecallQuery(
-            text=(
-                f"What do we know about {ctx['config'].objective}? "
-                "Which approaches have already failed on this, and how does this operator want it done?"
-            ),
-            entities=entities,
-            limit=resolved.memory.recall_limit,
-        )
+        from brain.memory.policy import MemoryPolicy
+        policy = MemoryPolicy(resolved)
+        query = policy.build_recall_query(ctx["config"].objective, entities)
         started = ctx["clock"].monotonic()
         try:
             found = list(ctx["memory"].recall(query))
@@ -969,17 +964,34 @@ class Brain:
         for criterion in understanding.success_criteria:
             if criterion in seen:
                 continue
-            ok = False
+                
+            prompt = ctx["assembler"].build(
+                task="DECIDE",
+                objective=ctx["config"].objective,
+                understanding=ctx["understanding"],
+                plan=ctx["plan"],
+                memories=ctx["memories"],
+                observations=self._observation_texts(ctx),
+                current_step=f"Verify overall success criterion: {criterion}",
+            )
+            payload = self._ask_json(ctx, prompt)
+            passed = bool(payload.get("passed", False))
+            evidence = str(payload.get("evidence", "") or "")
+            if passed and not evidence.strip():
+                passed = False
+
             ctx["emitter"].emit(
                 "verification.performed",
                 {
                     "criterion": criterion,
-                    "passed": False,
-                    "evidence": "",
+                    "passed": passed,
+                    "evidence": evidence,
                     "verified_by_tool": self._last_tool(ctx),
                 },
                 state=State.FINISH,
             )
+            if not passed:
+                ok = False
         return ok
 
     def _all_verified(self, ctx: dict[str, Any]) -> bool:
@@ -1091,28 +1103,18 @@ class Brain:
         skipped: list[dict[str, Any]] = []
         candidates: list[MemoryItem] = []
 
+        from brain.memory.policy import MemoryPolicy
+        policy = MemoryPolicy(resolved)
+
         for i, raw in enumerate(payload.get("memories", []) or [], 1):
             text = str(raw.get("text", "")).strip()
             kind_raw = str(raw.get("kind", "outcome"))
-            # The origin test, enforced in code rather than merely requested in the prompt: nothing
-            # that reads like an instruction from tool output is allowed into memory, because a
-            # remembered instruction would be re-injected into a future prompt with apparent
-            # authority.
-            if _INJECTION_RE.search(text):
-                skipped.append({"candidate": text[:120], "reason": "origin_test"})
+            
+            passed, reason, kind = policy.should_retain(text, kind_raw)
+            if not passed:
+                skipped.append({"candidate": text[:120], "reason": reason})
                 continue
-            # The horizon test as a cheap structural check: a memory that only makes sense with the
-            # run still in view ("the above", "this incident") will be useless in a month.
-            if re.search(r"(?i)\b(the above|this incident|just now|as we saw)\b", text):
-                skipped.append({"candidate": text[:120], "reason": "horizon_test"})
-                continue
-            try:
-                kind = MemoryKind(kind_raw)
-            except ValueError:
-                kind = MemoryKind.OUTCOME
-            if kind not in resolved.memory.retain_kinds:
-                skipped.append({"candidate": text[:120], "reason": "horizon_test"})
-                continue
+
             candidates.append(
                 MemoryItem(
                     id=ctx["ids"].new("mem"),

@@ -1,132 +1,16 @@
 {
   "memories": [
     {
-      "confidence": 0.95,
+      "confidence": 0.9,
       "entities": [
         "checkout-api",
-        "connection pool exhaustion",
         "restart_service"
       ],
-      "id": "mem-0001",
+      "id": "mem-f58020d807e8",
       "kind": "failure",
-      "observed_at": "2026-01-08T14:22:00+00:00",
-      "source_run_id": "run-000004",
-      "text": "Restarting checkout-api for database connection pool exhaustion resolved nothing. The service recovered for roughly 20 minutes and the incident recurred three times in 24 hours. The cause was a deploy that lowered db_pool_max, which a restart cannot undo.\n"
-    },
-    {
-      "confidence": 0.9,
-      "entities": [
-        "checkout-api",
-        "deploy history",
-        "restart_service"
-      ],
-      "id": "mem-0002",
-      "kind": "correction",
-      "observed_at": "2026-01-08T16:05:00+00:00",
-      "source_run_id": "run-000004",
-      "text": "Operator correction on checkout-api incidents: check the deploy history before restarting anything. A restart hides a bad release and makes the next occurrence harder to diagnose.\n"
-    },
-    {
-      "confidence": 0.9,
-      "entities": [
-        "checkout-api",
-        "db_pool_max",
-        "connection pool exhaustion"
-      ],
-      "id": "mem-0003",
-      "kind": "outcome",
-      "observed_at": "2026-02-19T11:40:00+00:00",
-      "source_run_id": "run-000003",
-      "text": "Raising db_pool_max on checkout-api from 10 to 60 resolved database connection pool exhaustion. The change was applied as a config rollout, not a code deploy, and the error rate returned to baseline within four minutes.\n"
-    },
-    {
-      "confidence": 0.85,
-      "entities": [
-        "status page",
-        "page_oncall",
-        "incident severity"
-      ],
-      "id": "mem-0004",
-      "kind": "preference",
-      "observed_at": "2026-02-02T09:00:00+00:00",
-      "source_run_id": "run-000002",
-      "text": "The on-call operator wants a status-page update posted within 10 minutes of any incident rated major or above, and never wants to be paged below major severity.\n"
-    },
-    {
-      "confidence": 0.9,
-      "entities": [
-        "checkout-api",
-        "Payments Platform",
-        "db_pool_max"
-      ],
-      "id": "mem-0005",
-      "kind": "entity_fact",
-      "observed_at": "2026-02-02T09:00:00+00:00",
-      "source_run_id": "run-000002",
-      "text": "checkout-api is owned by the Payments Platform team, whose on-call rotation is payments-primary. Its database pool is configured by db_pool_max, which ships at a default of 10 and is not sized for peak concurrency.\n"
-    },
-    {
-      "confidence": 0.85,
-      "entities": [
-        "checkout-api",
-        "SLO",
-        "p95 latency"
-      ],
-      "id": "mem-0006",
-      "kind": "entity_fact",
-      "observed_at": "2026-02-02T09:00:00+00:00",
-      "source_run_id": "run-000002",
-      "text": "checkout-api carries a 99.9% monthly availability SLO and a p95 latency target of 800ms. Paging is warranted once the burn rate exceeds 2x over a 30-minute window.\n"
-    },
-    {
-      "confidence": 0.8,
-      "entities": [
-        "deploy history",
-        "checkout-api",
-        "incident diagnosis"
-      ],
-      "id": "mem-0007",
-      "kind": "outcome",
-      "observed_at": "2026-02-27T10:15:00+00:00",
-      "source_run_id": "run-000008",
-      "text": "Correlating a symptom's onset with the nearest deploy boundary has been the fastest route to root cause on this estate: in recent months it identified the cause on the first attempt more often than log search alone.\n"
-    },
-    {
-      "confidence": 0.4,
-      "entities": [
-        "search-api",
-        "scale_replicas",
-        "queue depth"
-      ],
-      "id": "mem-0008",
-      "kind": "outcome",
-      "observed_at": "2025-12-03T18:30:00+00:00",
-      "source_run_id": "run-000001",
-      "text": "Scaling search-api from 4 to 8 replicas relieved a queue backlog during a traffic spike. Whether this generalises to other services is unconfirmed.\n"
-    },
-    {
-      "confidence": 0.5,
-      "entities": [
-        "payments-api",
-        "rollback_deploy"
-      ],
-      "id": "mem-0009",
-      "kind": "failure",
-      "observed_at": "2025-11-14T07:45:00+00:00",
-      "source_run_id": "run-000001",
-      "text": "A rollback of payments-api was attempted for an unrelated latency regression and did not help; the cause turned out to be an upstream dependency. Recorded so a future run does not assume a rollback is always the answer.\n"
-    },
-    {
-      "confidence": 0.6,
-      "entities": [
-        "postmortem",
-        "incident review"
-      ],
-      "id": "mem-0010",
-      "kind": "preference",
-      "observed_at": "2025-10-01T12:00:00+00:00",
-      "source_run_id": "run-000001",
-      "text": "Post-incident write-ups on this team are expected to name the specific config key or commit that caused the incident, not just the service.\n"
+      "observed_at": "2026-09-29T06:51:30.797413+00:00",
+      "source_run_id": "run-208fe850fed4",
+      "text": "restarting checkout-api for database connection pool exhaustion resolved nothing long-term because it masks the symptom without finding the config boundary."
     },
     {
       "confidence": 0.85,
@@ -135,10 +19,10 @@
         "rollback_deploy",
         "db_pool_max"
       ],
-      "id": "mem-9e36342b06ee",
+      "id": "mem-9fd8f60f9712",
       "kind": "outcome",
-      "observed_at": "2026-09-29T06:29:15.595681+00:00",
-      "source_run_id": "run-7f6a3c22c8fa",
+      "observed_at": "2026-09-29T06:51:30.981301+00:00",
+      "source_run_id": "run-63f3b6f90503",
       "text": "On checkout-api, rolling back the deploy that lowered db_pool_max resolved connection pool exhaustion; the error rate returned below 1% and was confirmed by a health check."
     }
   ],

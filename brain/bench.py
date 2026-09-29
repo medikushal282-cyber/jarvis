@@ -95,7 +95,7 @@ def _delta(before: float, after: float) -> str:
     return f"{after:g} ({change:+.1f}% {verdict})"
 
 
-def run_benchmark(*, root: Path, profile: str, objective: str, runs: int) -> int:
+def run_plumbing_benchmark(*, root: Path, profile: str, objective: str, runs: int) -> int:
     """Run both arms and print the comparison. Returns a process exit code."""
     print(f"objective: {objective}")
     print(f"profile:   {profile}    runs per arm: {runs}\n")
@@ -128,3 +128,41 @@ def run_benchmark(*, root: Path, profile: str, objective: str, runs: int) -> int
     else:
         print("No difference in steps to completion. The memory layer is not yet load-bearing here.")
     return 0
+
+
+def run_learning_benchmark(*, root: Path, profile: str, objective: str, runs: int) -> int:
+    """The real learning benchmark. Starts with empty memory and runs N times."""
+    print(f"objective: {objective}")
+    print(f"profile:   {profile}    runs per arm: {runs}\n")
+    
+    # We must ensure the seed is NOT used, by clearing the store and pretending it's the only source.
+    # In MockMemory, if store exists but is empty JSON, it doesn't fallback to seed.
+    store = root / ".brain" / "state" / "memory.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    
+    def _run_arm(enabled: bool) -> Arm:
+        store.write_text('{"memories": []}', encoding="utf-8")
+        return _measure(root=root, profile=profile, objective=objective, runs=runs, memory_enabled=enabled)
+
+    off = _run_arm(False)
+    on = _run_arm(True)
+
+    if not off.steps or not on.steps:
+        print("benchmark produced no usable runs", file=sys.stderr)
+        return 1
+
+    print(f"{'metric':<28}{'memory OFF':>15}{'memory ON':>26}")
+    print("-" * 69)
+    print(f"{'runs':<28}{off.runs:>15}{on.runs:>26}")
+    
+    # Calculate variances
+    def _var(vals: list[int]) -> float:
+        return statistics.variance(vals) if len(vals) > 1 else 0.0
+
+    print(f"{'steps to completion (mean)':<28}{_mean(off.steps):>10.2f} (±{_var(off.steps):.2f}){_delta(_mean(off.steps), _mean(on.steps)):>26}")
+    print(f"{'tool errors (mean)':<28}{_mean(off.tool_errors):>10.2f} (±{_var(off.tool_errors):.2f}){_delta(_mean(off.tool_errors), _mean(on.tool_errors)):>26}")
+    print(f"{'corrections needed (mean)':<28}{_mean(off.corrections):>10.2f} (±{_var(off.corrections):.2f}){_delta(_mean(off.corrections), _mean(on.corrections)):>26}")
+    print(f"{'success rate':<28}{off.successes / off.runs * 100:>14.1f}%{on.successes / on.runs * 100:>25.1f}%")
+    print()
+    return 0
+

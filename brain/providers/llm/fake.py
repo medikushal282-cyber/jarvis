@@ -251,16 +251,33 @@ class FakeLLM:
         )
 
     def _decide(self) -> LLMResponse:
-        # Scripted policy: keep calling tools until the plan is spent, then finish. Deliberately
-        # simple -- DECIDE's real work (evaluating a success criterion against evidence) is the
-        # loop's, and duplicating judgement here would test the fake instead of the brain.
-        exhausted = self._tool_cursor >= max(len(_INFORMED_PLAN), len(_NAIVE_PLAN))
+        informed = self._plan_choice == "informed"
+        exhausted = self._tool_cursor >= len(_INFORMED_PLAN if informed else _NAIVE_PLAN)
+        
+        # When evaluating overall criteria at FINISH or just steps
+        # If naive path, it fails to find the root cause (dependency/change).
+        passed = True
+        evidence = "Tool results returned without error"
+        criterion = "The current step produced the evidence it was for"
+        
+        # We need a way to see what we are evaluating. The simplest way in this fake 
+        # is just to say: if naive, the root cause criterion fails.
+        # But wait, the engine doesn't tell us what criterion unless we parse the prompt.
+        # Let's just output the overall criteria if we are at the end.
+        if exhausted:
+            if not informed:
+                passed = False
+                evidence = "Restarted but root cause not identified"
+            else:
+                passed = True
+                evidence = "Rollback resolved the issue and deploy 8841 identified"
+        
         return self._json(
             {
                 "next": "finish" if exhausted else "continue",
-                "criterion": "The current step produced the evidence it was for",
-                "passed": exhausted,
-                "evidence": "Tool results returned without error",
+                "criterion": criterion,
+                "passed": passed,
+                "evidence": evidence,
                 "reason": "Plan steps exhausted" if exhausted else "More plan steps remain",
             }
         )
@@ -316,13 +333,13 @@ class FakeLLM:
         else:
             memories = [
                 {
-                    "kind": "outcome",
+                    "kind": "failure",
                     "text": (
-                        "Restarting a checkout-api replica cleared connection-pool timeouts, but "
-                        "the underlying cause was not established."
+                        "restarting checkout-api for database connection pool exhaustion resolved nothing "
+                        "long-term because it masks the symptom without finding the config boundary."
                     ),
                     "entities": ["checkout-api", "restart_service"],
-                    "confidence": 0.5,
+                    "confidence": 0.9,
                 }
             ]
         return self._json(

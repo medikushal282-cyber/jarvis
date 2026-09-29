@@ -10,6 +10,12 @@
 
 Kept deliberately thin. Everything it does is reachable from the library too, because a CLI that
 can do something the library cannot is a CLI that grows a second implementation of it.
+
+Exit codes:
+  0: Run completed successfully
+  1: Unexpected error or interrupt
+  2: Run ended in a partial, escalated, or failed state, or configuration error
+  3: BrainError (application logic error)
 """
 
 from __future__ import annotations
@@ -67,7 +73,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 fh.write(event.to_json() + "\n")
         print(f"\ntrace: {trace_path} ({len(sink.events)} events)")
 
-    return 0 if str(result.status) == "completed" else 1
+    if str(result.status) == "completed":
+        return 0
+    return 2
 
 
 def _cmd_tools(args: argparse.Namespace) -> int:
@@ -132,15 +140,27 @@ def _cmd_config_reload(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark(args: argparse.Namespace) -> int:
-    from brain.bench import run_benchmark
+    from brain.bench import run_plumbing_benchmark, run_learning_benchmark
 
-    return run_benchmark(
+    if getattr(args, "learning", False):
+        return run_learning_benchmark(
+            root=Path(args.root),
+            profile=args.profile,
+            objective=args.objective,
+            runs=args.runs,
+        )
+    return run_plumbing_benchmark(
         root=Path(args.root),
         profile=args.profile,
         objective=args.objective,
         runs=args.runs,
     )
 
+
+def _cmd_conformance(args: argparse.Namespace) -> int:
+    from brain.tools.conformance import run_conformance
+
+    return run_conformance(args)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="brain", description="JARVIS agent brain")
@@ -178,7 +198,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Find out why and fix it if you can."
         ),
     )
+    bench.add_argument("--learning", action="store_true", help="run the true learning benchmark (starts empty)")
     bench.set_defaults(func=_cmd_benchmark)
+
+    conf = sub.add_parser("conformance", help="run the provider conformance suite")
+    conf.add_argument("--provider", required=True, help="capability name (e.g., observability)")
+    conf.add_argument("--impl", required=True, help="implementation name (e.g., real)")
+    conf.set_defaults(func=_cmd_conformance)
+
     return parser
 
 

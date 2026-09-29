@@ -226,8 +226,8 @@ contained no `yield`, which would have raised `TypeError` on the first `next()`;
 | `CallParser` JSON_MODE didn't drop `tools` | `brain/llm/parsing.py:_request_for` | Added `tools=()` to the JSON_MODE dataclass replacement |
 | Illegal state transition SELECT→"replanned" | `brain/loop/engine.py:_drive` | Added `machine.enter("denied", ...)` before replanned; added `machine.enter("planned", ...)` after |
 | Same transition bug from DECIDE→"replan" path | `brain/loop/engine.py:_apply_decision` | Added `machine.enter("planned", "replan complete")` after replanning |
-| Test expected 23 tools; actual count is 29 | `tests/test_vertical_slice.py` | Updated assertion to 29 |
-| `BadThenGood` succeeded on repair; JSON mode never reached | `tests/test_vertical_slice.py` | Changed branch to `if not request.disable_native_tools` so all native-tools calls fail |
+| Test expected 23 tools; actual count is 29 | `tests/test_vertical_slice.py` | Updated assertion to 29. **Justification:** The 6 tool YAML files actually declare 29 tools (11 business, 5 observability, 4 incident, 4 remediation, 3 comms, 2 memory). The test was written with a stale assumption. |
+| `BadThenGood` succeeded on repair; JSON mode never reached | `tests/test_vertical_slice.py` | Changed branch to `if not request.disable_native_tools` so all native-tools calls fail. **Justification:** `CallParser` handles `max_repairs=1`. If `BadThenGood` fails on the 1st call and succeeds on the 2nd (the repair), then JSON mode is never reached. To test the fallback to JSON mode, the mock LLM must fail all native-tools attempts. |
 
 ### Verification results
 
