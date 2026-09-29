@@ -102,6 +102,7 @@ def test_memory_on_ends_completed_and_off_ends_partial() -> None:
     # Memory ON
     result_on = Brain(root=Path(".")).run(
         RunConfig(
+            provider_overrides={"llm": "fake", "memory": "mock"},
             objective="checkout-api is returning 5xx errors",
             profile="devops",
             memory_enabled=True,
@@ -112,6 +113,7 @@ def test_memory_on_ends_completed_and_off_ends_partial() -> None:
     # Memory OFF
     result_off = Brain(root=Path(".")).run(
         RunConfig(
+            provider_overrides={"llm": "fake", "memory": "mock"},
             objective="checkout-api is returning 5xx errors",
             profile="devops",
             memory_enabled=False,
@@ -132,3 +134,26 @@ def test_tools_md_not_drifted() -> None:
     
     after = tools_md.read_text(encoding="utf-8")
     assert before == after, "config/tools.md has drifted! Run python -m brain.docs.gen_tools_md to fix."
+
+def test_retain_learns_and_influences_run_2(tmp_path: Path) -> None:
+    """B3: with EMPTY seed memory, run 2 recalls what run 1 stored and changes its plan."""
+    from brain.bench import _measure
+    from pathlib import Path
+    import json
+    
+    root = Path(__file__).parent.parent
+    store = root / ".brain" / "state" / "memory.json"
+    if store.exists():
+        store.unlink()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps({"version": 1, "memories": []}), encoding="utf-8")
+    
+    # Run 1: Memory is empty. Should end partial (since the first fake run with no memory ends partial)
+    # Wait, in the fake LLM, _measure stores the RunResult.
+    on = _measure(root=root, profile="devops", objective="checkout-api is returning 5xx errors", runs=2, memory_enabled=True)
+    
+    # In learning benchmark, Run 1 will have successes=0 (partial) and Run 2 will have successes=1 (completed)
+    # _measure returns AggregatedMetrics which only has total successes, steps array etc.
+    assert on.runs == 2
+    assert on.successes == 1, "Run 2 should succeed after Run 1 fails and learns"
+

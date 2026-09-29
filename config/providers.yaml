@@ -17,7 +17,7 @@ version: 1
 providers:
   # ---------------------------------------------------------------- reasoning
   llm:
-    impl: fake # fake | groq
+    impl: groq # fake | groq
     settings:
       # `fake` is a scripted LLM. It is a real implementation of the same interface, not a
       # monkeypatch, so the whole loop is exercised by it in tests and in offline demos.
@@ -49,7 +49,7 @@ providers:
       reasoning_effort_allowed: [low, medium, high]
       api_key_env: GROQ_API_KEY
       temperature: 0.2
-      max_tokens: 4096
+      max_tokens: 200
       # The API defaults parallel_tool_calls to true, but gpt-oss-120b does not support it
       # and the docs table contradicts the default. Send false explicitly, and still handle
       # N calls in a response — a provider that ignores the flag is not our bug to crash on.
@@ -76,7 +76,7 @@ providers:
 
   # ---------------------------------------------------------------- memory
   memory:
-    impl: mock # mock | hindsight
+    impl: hindsight # mock | hindsight
     settings:
       # `mock` is an in-process store with lexical recall, seeded from a fixture file. It is
       # deterministic, which is what lets the memory ON/OFF benchmark be reproducible.

@@ -6,10 +6,10 @@
         "checkout-api",
         "restart_service"
       ],
-      "id": "mem-f58020d807e8",
+      "id": "mem-0db6d7994285",
       "kind": "failure",
-      "observed_at": "2026-09-29T06:51:30.797413+00:00",
-      "source_run_id": "run-208fe850fed4",
+      "observed_at": "2026-09-29T07:27:56.205138+00:00",
+      "source_run_id": "run-8a915e3ce49b",
       "text": "restarting checkout-api for database connection pool exhaustion resolved nothing long-term because it masks the symptom without finding the config boundary."
     },
     {
@@ -19,10 +19,10 @@
         "rollback_deploy",
         "db_pool_max"
       ],
-      "id": "mem-9fd8f60f9712",
+      "id": "mem-27b8a47b16e5",
       "kind": "outcome",
-      "observed_at": "2026-09-29T06:51:30.981301+00:00",
-      "source_run_id": "run-63f3b6f90503",
+      "observed_at": "2026-09-29T07:27:56.384753+00:00",
+      "source_run_id": "run-2965c3a07b31",
       "text": "On checkout-api, rolling back the deploy that lowered db_pool_max resolved connection pool exhaustion; the error rate returned below 1% and was confirmed by a health check."
     }
   ],

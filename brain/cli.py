@@ -23,6 +23,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import os
+import dotenv
+dotenv.load_dotenv(override=True)
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -30,12 +33,15 @@ from brain.errors import BrainError, ConfigError
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    from brain.events.sinks import MemorySink, MultiSink, StdoutSink
+    from brain.events.sinks import MemorySink, MultiSink, StdoutSink, JsonlSink
     from brain.loop.engine import Brain, RunConfig
 
     root = Path(args.root)
     sink = MemorySink()
-    live = MultiSink(StdoutSink(compact=not args.verbose), sink) if args.trace else sink
+    if args.trace:
+        live = MultiSink(StdoutSink(compact=not args.verbose), JsonlSink(root / ".brain/state/events.jsonl"), sink)
+    else:
+        live = sink
     brain = Brain(root=root, sink=live)
 
     result = brain.run(

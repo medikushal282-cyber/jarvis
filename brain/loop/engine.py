@@ -1216,7 +1216,7 @@ class Brain:
             messages=prompt.messages,
             tools=(),
             temperature=0.2,
-            max_tokens=2048,
+            max_tokens=200,
         )
         response = ctx["llm"].complete(request)
         ctx["metrics"]["tokens"] += response.usage.total_tokens

@@ -465,7 +465,7 @@ _CORE_EVENTS = (
 
 def test_full_run_completes_and_emits_the_core_events() -> None:
     brain = Brain(root=ROOT)
-    result = brain.run(RunConfig(objective=_OBJECTIVE, profile="devops", memory_enabled=True))
+    result = brain.run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops", memory_enabled=True))
 
     assert result.run_id
     assert result.status in {RunStatus.COMPLETED, RunStatus.PARTIAL}, result.answer
@@ -479,7 +479,7 @@ def test_full_run_completes_and_emits_the_core_events() -> None:
 
 def test_sequence_numbers_are_contiguous_from_zero() -> None:
     brain = Brain(root=ROOT)
-    brain.run(RunConfig(objective=_OBJECTIVE, profile="devops"))
+    brain.run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops"))
     assert brain._last_events is not None
     seqs = [e.seq for e in brain._last_events.events]
     assert seqs == list(range(len(seqs))), "seq must be monotonic and gapless"
@@ -487,8 +487,8 @@ def test_sequence_numbers_are_contiguous_from_zero() -> None:
 
 def test_trace_is_deterministic_under_a_frozen_clock() -> None:
     """Sequential ids plus a frozen clock are what make two runs comparable at all."""
-    first = Brain(root=ROOT).run(RunConfig(objective=_OBJECTIVE, profile="devops"))
-    second = Brain(root=ROOT).run(RunConfig(objective=_OBJECTIVE, profile="devops"))
+    first = Brain(root=ROOT).run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops"))
+    second = Brain(root=ROOT).run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops"))
     assert first.metrics.steps_to_completion == second.metrics.steps_to_completion
     assert first.status == second.status
 
@@ -496,7 +496,7 @@ def test_trace_is_deterministic_under_a_frozen_clock() -> None:
 def test_memory_on_produces_attributed_influence() -> None:
     """The most important assertion here: memory must be visibly load-bearing."""
     brain = Brain(root=ROOT)
-    brain.run(RunConfig(objective=_OBJECTIVE, profile="devops", memory_enabled=True))
+    brain.run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops", memory_enabled=True))
     assert brain._last_events is not None
 
     recall = brain._last_events.of_type("recall.performed")
@@ -514,7 +514,7 @@ def test_memory_on_produces_attributed_influence() -> None:
 def test_memory_off_emits_no_influence_and_still_completes() -> None:
     """The A/B baseline: with memory off the loop still finishes and claims nothing."""
     brain = Brain(root=ROOT)
-    result = brain.run(RunConfig(objective=_OBJECTIVE, profile="devops", memory_enabled=False))
+    result = brain.run(RunConfig(provider_overrides={"llm": "fake", "memory": "mock"}, objective=_OBJECTIVE, profile="devops", memory_enabled=False))
     assert result.answer.strip(), "a memory-off run must still produce a report"
     assert brain._last_events is not None
 
