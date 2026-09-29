@@ -539,7 +539,7 @@ async def executor_node(state: dict) -> dict:
 
         elif action in ["OPEN_BROWSER", "LAUNCH_PREVIEW"]:
             rel_path = args.get("path") or target or "index.html"
-            preview_url = f"http://localhost:8000/api/preview/{rel_path}"
+            preview_url = f"http://localhost:8006/api/preview/{rel_path}"
 
             await emit(run_id, "tool_call_started", "executor", {"tool": "open_browser", "url": preview_url, "path": rel_path})
 

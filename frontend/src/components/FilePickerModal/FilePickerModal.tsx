@@ -30,7 +30,7 @@ export const FilePickerModal: React.FC<FilePickerModalProps> = ({ isOpen, onClos
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`http://localhost:8000/api/workspace/files?path=${encodeURIComponent(path)}`, {
+      const res = await fetch(`http://localhost:8006/api/workspace/files?path=${encodeURIComponent(path)}`, {
         headers: {
           'X-Workspace-Id': workspaceId || 'default'
         }

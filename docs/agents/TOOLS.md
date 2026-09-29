@@ -22,3 +22,9 @@ JARVIS has access to the following workspace tools:
 - `diff_files(path_a, path_b)`: Get unified diff.
 - `install_package(name, manager="pip")`: Install dependencies.
 - `patch_file(path, find, replace, count=1)`: Find-and-replace in a file.
+
+## Multimodal & Attachment Tools
+- `analyze_image(attachment_id, prompt)`: Inspects actual image pixels and visual content using a vision-capable model. Never guess from filename.
+- `get_attachment_info(attachment_id)`: Returns metadata (filename, size, MIME, dimensions) for conversation attachments.
+- Note: Conversation attachments are input artifacts managed by AttachmentManager, NOT files in the workspace directory. Do not use `list_directory` or `search_files` to find conversation attachments.
+

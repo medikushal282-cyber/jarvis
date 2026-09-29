@@ -47,7 +47,7 @@ DEFAULT_WORKSPACE_ID = os.environ.get("JARVIS_DEFAULT_WORKSPACE", "default")
 #: Read at call time so the brain can be switched without a restart, and so a
 #: test can select one regardless of module import order.
 def agent_impl() -> str:
-    return os.environ.get("JARVIS_AGENT", "legacy").strip().lower()
+    return os.environ.get("JARVIS_AGENT", "core").strip().lower()
 
 
 #: Snapshot at import, for display only. Never branch on this.

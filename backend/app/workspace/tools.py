@@ -584,7 +584,7 @@ def tool_preview_browser(path: str = "") -> Dict[str, Any]:
     try:
         if not path:
             path = "index.html"
-        url = "http://localhost:8000/api/preview/" + urllib.parse.quote(path)
+        url = "http://localhost:8006/api/preview/" + urllib.parse.quote(path)
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
             html = response.read().decode('utf-8', errors='replace')

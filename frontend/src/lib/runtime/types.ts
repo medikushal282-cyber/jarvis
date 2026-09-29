@@ -42,6 +42,16 @@ export interface Turn {
   metadata?: Record<string, any>;
 }
 
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  description?: string;
+  user_id?: string;
+  created_at?: string;
+  session_count?: number;
+  conversation_count?: number;
+}
+
 export interface SessionSummary {
   id: string;
   user_id: string;
