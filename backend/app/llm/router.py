@@ -274,7 +274,13 @@ def extract_thoughts(raw_text: str) -> Tuple[str, Optional[str]]:
         return cleaned_text, thought_text
     return raw_text.strip(), None
 
-def call_litellm(system: str, user: str, model: str, provider: str = "groq") -> str:
+def call_litellm(
+    system: str,
+    user: str,
+    model: str,
+    provider: str = "groq",
+    tools: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     import litellm
     prov = (provider or "groq").lower()
     model_str = model or "openai/gpt-oss-120b"
@@ -292,20 +298,62 @@ def call_litellm(system: str, user: str, model: str, provider: str = "groq") -> 
         if not model_str.startswith("anthropic/"):
             model_str = f"anthropic/{model_str}"
     
-    response = litellm.completion(
-        model=model_str,
-        messages=[
+    kwargs: Dict[str, Any] = {
+        "model": model_str,
+        "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user}
+            {"role": "user", "content": user},
         ]
-    )
-    return response.choices[0].message.content or ""
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    try:
+        response = litellm.completion(**kwargs)
+        message = response.choices[0].message
+        
+        # Check for native function / tool calls
+        tool_calls = getattr(message, "tool_calls", None)
+        content = message.content or ""
+
+        if tool_calls:
+            rendered_calls = []
+            for tc in tool_calls:
+                fn = getattr(tc, "function", None)
+                if fn:
+                    fn_name = getattr(fn, "name", "")
+                    fn_args = getattr(fn, "arguments", "{}")
+                    try:
+                        parsed_args = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
+                    except Exception:
+                        parsed_args = {"raw": str(fn_args)}
+                    rendered_calls.append(f"<tool_call>\n{json.dumps({'name': fn_name, 'arguments': parsed_args})}\n</tool_call>")
+            
+            tool_str = "\n".join(rendered_calls)
+            return f"{content}\n{tool_str}".strip() if content else tool_str
+
+        return content
+    except Exception as exc:
+        # Handle Groq's failed_generation if model generated a tool format string
+        err_msg = str(exc)
+        if "failed_generation" in err_msg:
+            try:
+                match = re.search(r'"failed_generation":\s*"({.*?})"', err_msg)
+                if match:
+                    raw_json_str = match.group(1).encode().decode('unicode-escape')
+                    return f"<tool_call>\n{raw_json_str}\n</tool_call>"
+            except Exception:
+                pass
+        raise exc
+
 
 def call_llm(
     system: str,
     user: str,
     model: str = "openai/gpt-oss-120b",
-    provider: str = "groq"
+    provider: str = "groq",
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Unified LLM router using LiteLLM to route to Groq, Ollama, OpenAI, or Anthropic.
@@ -314,15 +362,15 @@ def call_llm(
     prov = (provider or "groq").lower()
     
     try:
-        raw_response = call_litellm(system, user, model, prov)
+        raw_response = call_litellm(system, user, model, prov, tools=tools)
     except Exception as e:
         # Graceful fallback to default active Groq model if configured
         if os.environ.get("GROQ_API_KEY"):
             try:
-                raw_response = call_litellm(system, user, "openai/gpt-oss-120b", "groq")
+                raw_response = call_litellm(system, user, "openai/gpt-oss-120b", "groq", tools=tools)
             except Exception:
                 try:
-                    raw_response = call_litellm(system, user, "qwen/qwen3.8-27b", "groq")
+                    raw_response = call_litellm(system, user, "qwen/qwen3.8-27b", "groq", tools=tools)
                 except Exception:
                     raise e
         else:

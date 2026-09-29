@@ -32,6 +32,7 @@ class ToolRegistry:
         tool_names: Optional[List[str]] = None,
         categories: Optional[List[str]] = None,
         names: Optional[List[str]] = None,
+        as_openai: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Returns JSON-serializable tool definitions for LLM function calling.
@@ -45,6 +46,19 @@ class ToolRegistry:
         if categories is not None:
             cat_set = set(categories)
             tools = [t for t in tools if getattr(t, "category", None) in cat_set or getattr(t, "required_permission", "").split(".")[0] in cat_set]
+        
+        if as_openai:
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+                for tool in tools
+            ]
         return [tool.get_definition() for tool in tools]
 
     def validate_schema(self, tool: Tool, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:

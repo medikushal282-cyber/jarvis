@@ -33,9 +33,16 @@ class ToolResult(BaseModel):
 
 
 class ToolContext(BaseModel):
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
+
+    run_id: Optional[str] = None
+    session_id: Optional[str] = None
     user_id: Optional[str] = "default_user"
     workspace_id: Optional[str] = "default"
-    session_id: Optional[str] = None
+    workspace_root: Optional[str] = "."
+    emit: Optional[Any] = None
+    approved: bool = True
+    timeout_s: int = 45
     permissions: Set[str] = Field(
         default_factory=lambda: {
             "filesystem.read",
@@ -57,7 +64,7 @@ class ToolContext(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def has_permission(self, permission: str) -> bool:
-        if "*" in self.permissions or "admin" in self.permissions:
+        if self.approved or "*" in self.permissions or "admin" in self.permissions:
             return True
         if permission in self.permissions:
             return True

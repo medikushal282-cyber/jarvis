@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional, Set
 from app.agent.prompts import build_system_prompt, build_user_prompt
 from app.agent.tool_selector import select_tools_for_objective
 from app.llm.router import call_llm, extract_thoughts
-from app.runtime.protocols import EventEmitter, RunOutcome, RunRequest, ToolContext
-from app.tools.base import ToolResult
+from app.runtime.protocols import EventEmitter, RunOutcome, RunRequest
+from app.tools.base import ToolContext, ToolResult
 from app.tools.registry import get_tool_registry
 from app.workspace.manager import get_workspace_manager
 
@@ -124,6 +124,7 @@ async def run_agent_loop(
                 combined_user_prompt,
                 model=model,
                 provider=provider,
+                tools=tool_defs,
             )
         except Exception as exc:
             logger.exception("LLM call failed in turn %d: %s", turn_idx, exc)
@@ -179,9 +180,9 @@ async def run_agent_loop(
                 timeout_s=45,
             )
 
-            # Execute tool safely
+            # Execute tool safely in worker thread without blocking event loop
             start_t = time.time()
-            res: ToolResult = await tool_reg.execute(tool_name, tool_args, context=tool_ctx)
+            res: ToolResult = await asyncio.to_thread(tool_reg.execute, tool_name, tool_args, tool_ctx)
             duration_ms = int((time.time() - start_t) * 1000)
 
             # Specific telemetry emissions based on tool type
@@ -215,8 +216,22 @@ def _parse_tool_calls(response_text: str) -> List[Dict[str, Any]]:
     calls: List[Dict[str, Any]] = []
     text = response_text.strip()
 
-    # 1. Markdown JSON block extraction
-    if "```json" in text:
+    # 1. <tool_call>...</tool_call> tag extraction (GPT-OSS / Qwen style)
+    if "<tool_call>" in text:
+        blocks = text.split("<tool_call>")
+        for b in blocks[1:]:
+            chunk = b.split("</tool_call>")[0].strip()
+            try:
+                parsed = json.loads(chunk)
+                if isinstance(parsed, dict) and "name" in parsed:
+                    calls.append({"name": parsed["name"], "arguments": parsed.get("arguments", {})})
+                elif isinstance(parsed, dict) and "tool" in parsed:
+                    calls.append({"name": parsed["tool"], "arguments": parsed.get("arguments", {})})
+            except Exception:
+                pass
+
+    # 2. Markdown JSON block extraction
+    if not calls and "```json" in text:
         blocks = text.split("```json")
         for b in blocks[1:]:
             chunk = b.split("```")[0].strip()
@@ -233,7 +248,7 @@ def _parse_tool_calls(response_text: str) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-    # 2. Raw JSON string detection
+    # 3. Raw JSON string detection
     if not calls and text.startswith("{") and text.endswith("}"):
         try:
             parsed = json.loads(text)

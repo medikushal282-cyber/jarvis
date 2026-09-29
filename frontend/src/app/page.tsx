@@ -382,6 +382,7 @@ export default function FraidayWorkspace() {
       setRunStatus('running');
       
       let latestChatText = '';
+      let isTerminal = false;
       const evtSource = new EventSource(`http://localhost:8006/api/runs/${data.run_id}/events`);
       
       evtSource.onmessage = async (event) => {

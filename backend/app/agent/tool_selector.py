@@ -67,6 +67,6 @@ def select_tools_for_objective(
     if has_attachments or any(k in obj_lower for k in ["image", "picture", "photo", "visual", "diagram", "screenshot"]):
         selected_names.update(["analyze_image", "get_attachment_info"])
 
-    # Retrieve filtered tool schemas from registry
-    tools_defs = reg.get_tool_definitions(tool_names=list(selected_names))
+    # Retrieve filtered tool schemas from registry in OpenAI function calling format
+    tools_defs = reg.get_tool_definitions(tool_names=list(selected_names), as_openai=True)
     return tools_defs

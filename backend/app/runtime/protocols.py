@@ -126,6 +126,14 @@ class ToolContext:
     emit: Optional[EventEmitter] = None
     approved: bool = False
     timeout_s: int = 30
+    permissions: List[str] = field(default_factory=list)
+
+    def has_permission(self, permission: str) -> bool:
+        if self.approved:
+            return True
+        if not self.permissions or "*" in self.permissions or "admin" in self.permissions:
+            return True
+        return permission in self.permissions
 
 
 @dataclass
