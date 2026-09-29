@@ -1,5 +1,4 @@
-export { default as VoiceButton } from "./VoiceButton";
-export { default as VoiceControl } from "./VoiceControl";
-export type { VoiceControlHandle } from "./VoiceControl";
+export { default as VoiceDock } from "./VoiceDock";
+export type { VoiceDockHandle } from "./VoiceDock";
 export { default as JarvisVoiceOverlay } from "./JarvisVoiceOverlay";
-export { default } from "./VoiceButton";
+export { default } from "./VoiceDock";

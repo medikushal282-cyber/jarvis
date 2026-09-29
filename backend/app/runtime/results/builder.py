@@ -11,8 +11,10 @@ See docs/runtime/RESULTS.md.
 from __future__ import annotations
 
 import posixpath
+import re
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 from app.runtime.events import catalog
 from app.runtime.ids import stable_artifact_id
@@ -50,6 +52,26 @@ MIME_BY_SUFFIX = {
 }
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+
+INTERACTION_RE = re.compile(r"click|type|scroll|screenshot|press|hover|fill", re.IGNORECASE)
+_OWN_PREVIEW_RE = re.compile(r"(^|//[^/]+)/api/(runs/[^/]+/artifacts|preview)/")
+
+
+def _is_own_preview(url: str) -> bool:
+    """A URL served by this backend's artifact or preview endpoints."""
+    if _OWN_PREVIEW_RE.search(url):
+        return True
+    # A bare workspace path ("shop/index.html") from the current brain.
+    return "://" not in url and not url.startswith("/")
+
+
+def _url_label(url: str) -> str:
+    """Show an outside page by its host, never as a raw URL."""
+    try:
+        host = urlparse(url).hostname
+    except ValueError:
+        host = None
+    return host or url
 
 
 def _norm(path: str) -> str:
@@ -216,14 +238,24 @@ class ResultBuilder:
             )
 
     def _on_browser_action(self, data: dict, ts: Optional[str]) -> None:
-        url = data.get("url")
-        if data.get("action") in (None, "open", "navigate") and url:
-            if url not in self._urls:
-                self._urls.append(url)
+        # Interactions inside a page are not "opened a page". The current brain
+        # puts its tool name in `action` (e.g. "open_browser"), so anything
+        # that is not an interaction counts as opening.
+        action = str(data.get("action") or "")
+        if INTERACTION_RE.search(action):
+            return
+        url = str(data.get("url") or "").strip()
+        if not url:
+            return
+        if url not in self._urls:
+            self._urls.append(url)
+            # A preview of one of JARVIS's own files is that file, which is
+            # already an artifact; only outside pages get a card of their own.
+            if not _is_own_preview(url):
                 self._add_artifact(
-                    url, "created", 0, ts, kind="url", name=url, url=url
+                    url, "created", 0, ts, kind="url", name=_url_label(url), url=url
                 )
-            self._bump("browser")
+        self._bump("browser")
 
     def _on_tool_completed(self, data: dict, ts: Optional[str]) -> None:
         self._bump("tool")

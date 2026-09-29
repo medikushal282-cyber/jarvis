@@ -117,6 +117,34 @@ class TestSessionStore(StoreTestCase):
         self.assertEqual(loaded.context_summary, "greeting exchange")
         self.assertEqual(loaded.workspace_id, "legacy_ws")
 
+    def test_workspace_id_comes_from_the_directory_not_stale_json(self):
+        """sandbox/kushal/workspace.json holds "kushal\\" from the old API."""
+        import json
+
+        ws_dir = self.tmp / "kushal"
+        ws_dir.mkdir()
+        (ws_dir / "workspace.json").write_text(
+            json.dumps({"id": "kushal" + chr(92), "name": "Kushal" + chr(92)}), encoding="utf-8"
+        )
+        ids = [w["id"] for w in self.workspaces.list()]
+        self.assertIn("kushal", ids)
+        self.assertNotIn("kushal" + chr(92), ids)
+
+    def test_migrated_legacy_conversation_is_listed_once(self):
+        import json
+
+        ws = self.workspaces.create("legacy_ws")
+        conv_dir = Path(ws["root_path"]) / "conversations"
+        conv_dir.mkdir(parents=True, exist_ok=True)
+        (conv_dir / "conv_dup01.json").write_text(
+            json.dumps({"id": "conv_dup01", "title": "old", "messages": []}), encoding="utf-8"
+        )
+        # A new turn saves it under sessions/; the legacy copy stays behind.
+        self.sessions.append_turn("conv_dup01", Turn(role="user", content="hi"))
+        listed = [s["id"] for s in self.sessions.list(workspace_id="legacy_ws")]
+        self.assertEqual(listed.count("conv_dup01"), 1)
+        self.assertEqual(self.workspaces.list()[0]["session_count"], 1)
+
     def test_list_filters_by_user_and_status(self):
         a = self.sessions.create("ws1", "usr_a", "A")
         self.sessions.create("ws1", "usr_b", "B")

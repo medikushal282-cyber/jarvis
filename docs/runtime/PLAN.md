@@ -24,8 +24,8 @@ back to `core` needs no UI change.
 | Phase | Goal | Status |
 | :--- | :--- | :--- |
 | 0 | Safety and shared contracts | **Done** |
-| 1 | One event flow in the frontend | Next |
-| 2 | Permissions and Turbo | Needs 3.5 sign-off from Nikunj and Lohit |
+| 1 | One event flow in the frontend | **Done** |
+| 2 | Permissions and Turbo | Next — needs 3.5 sign-off from Nikunj and Lohit |
 | 3 | Worker panel and switching | |
 | 4 | Artifacts and preview | |
 | 5 | Voice end to end | |
@@ -47,9 +47,16 @@ back to `core` needs no UI change.
   tests.
 - Contract written up in INTERFACES.md sections 3.5 to 3.7.
 
-## Phase 1 — One event flow in the frontend
+## Phase 1 — One event flow in the frontend (done)
 
 The refactor everything else sits on.
+
+Shipped: `lib/runtime/runReducer.ts` (14 unit tests), `useRun`, `useSessions`,
+`components/Workspace/*`, `components/Voice/VoiceDock.tsx`; `page.tsx` went
+from 1,411 lines to about 250. Verified in a real browser with
+`backend/scripts/e2e_ui.py` (18 checks). The UI tolerates the current brain's
+event shapes (`arguments`, no `call_id`, tool names in `browser_action`),
+listed for Nikunj in INTERFACES.md section 6.
 
 - `runReducer`: one pure function from events to a single run state (status,
   progress steps, artifacts, pending permission, worker, reply, error). It

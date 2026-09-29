@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from 'react';
+import { API_BASE } from "@/lib/runtime/client";
 
 interface BrowserPreviewProps {
   url: string;
@@ -44,7 +45,7 @@ export const BrowserPreview: React.FC<BrowserPreviewProps> = ({
           wsId = parts[3];
         }
       } catch (e) {}
-      dest = `http://localhost:8006/api/preview/${wsId}/${dest}`;
+      dest = `${API_BASE}/api/preview/${wsId}/${dest}`;
     }
     setCurrentUrl(dest);
     setInputUrl(dest);

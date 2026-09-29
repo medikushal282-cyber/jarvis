@@ -134,6 +134,7 @@ export const sessions = {
       model?: string;
       provider?: string;
       input_mode?: "text" | "voice";
+      execution_mode?: "normal" | "turbo";
       workspace_id?: string;
       attachments?: Array<{ name: string; content: string; size?: number }>;
       audio_url?: string | null;

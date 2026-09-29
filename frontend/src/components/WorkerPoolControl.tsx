@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from "@/lib/runtime/client";
 
-const API_BASE = process.env.NEXT_PUBLIC_JARVIS_API || 'http://localhost:8006';
 
 export default function WorkerPoolControl() {
   const [open, setOpen] = useState(false);

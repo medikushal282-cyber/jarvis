@@ -215,6 +215,31 @@ class TestLegacyEvents(unittest.TestCase):
         self.assertIn("Gathered 1 research finding", labels)
 
 
+class TestBrowserActions(unittest.TestCase):
+    def test_brain_style_action_name_still_counts_as_opening(self):
+        """The current brain sends action="open_browser" and a bare path."""
+        r = build_result([ev(1, "browser_action", {"action": "open_browser", "url": "shop/index.html"})])
+        self.assertEqual(r["urls_opened"], ["shop/index.html"])
+        self.assertIn("Opened 1 page", [a["label"] for a in r["actions"]])
+        self.assertEqual(r["artifacts"], [], "a workspace file preview is not a separate artifact")
+
+    def test_preview_of_own_artifact_is_not_a_second_card(self):
+        r = build_result([
+            ev(1, "file_created", {"path": "site/index.html", "bytes": 5}),
+            ev(2, "browser_action", {"action": "open", "url": "/api/runs/run_demo01/artifacts/art_x"}),
+        ])
+        self.assertEqual([a["name"] for a in r["artifacts"]], ["index.html"])
+
+    def test_outside_page_is_named_by_host_not_raw_url(self):
+        r = build_result([ev(1, "browser_action", {"action": "open", "url": "https://docs.python.org/3/library/re.html"})])
+        self.assertEqual(r["artifacts"][0]["name"], "docs.python.org")
+        self.assertEqual(r["artifacts"][0]["url"], "https://docs.python.org/3/library/re.html")
+
+    def test_interactions_are_not_page_opens(self):
+        r = build_result([ev(1, "browser_action", {"action": "click", "url": "https://x.test"})])
+        self.assertEqual(r["urls_opened"], [])
+
+
 class TestDeterminism(unittest.TestCase):
     def test_replaying_a_log_reproduces_the_result(self):
         """Criterion 6, modulo the generated artifact ids."""
