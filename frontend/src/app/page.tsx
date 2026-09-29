@@ -7,6 +7,7 @@ import ModelSelectorModal from "@/components/ModelSelector";
 import FilePickerModal from "@/components/FilePickerModal";
 import { useVoice } from "@/lib/runtime";
 import { JarvisVoiceOverlay } from "@/components/Voice";
+import WorkerPoolControl from "@/components/WorkerPoolControl";
 
 interface ToolActivity {
   id: string;
