@@ -8,9 +8,13 @@ from app.workspace.manager import active_workspace_id
 load_dotenv()
 
 from app.api.runs import router as runs_router
+from app.api.sessions import router as sessions_router, runs_router as run_reads_router
+from app.api.voice import router as voice_router
 from app.api.workspace import router as workspace_router
 from app.api.preview import router as preview_router
 from app.api.sandbox import router as sandbox_router
+from app.api.artifacts import router as artifacts_router
+from app.api.workers import router as workers_router
 from app.llm.router import get_models_catalog
 
 app = FastAPI(title="JARVIS Orchestration API", version="1.0.0")
@@ -41,9 +45,14 @@ app.add_middleware(
 )
 
 app.include_router(runs_router, prefix="/api")
+app.include_router(run_reads_router, prefix="/api")
+app.include_router(sessions_router, prefix="/api")
+app.include_router(voice_router, prefix="/api")
 app.include_router(workspace_router, prefix="/api")
 app.include_router(preview_router, prefix="/api")
 app.include_router(sandbox_router, prefix="/api")
+app.include_router(artifacts_router, prefix="/api")
+app.include_router(workers_router, prefix="/api")
 
 @app.get("/api/models")
 def list_models():
@@ -100,4 +109,4 @@ def groq_health():
         }
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8006, reload=True)

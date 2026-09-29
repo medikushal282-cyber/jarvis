@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Five Button Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    button { margin: 5px; padding: 10px 20px; }
+    #toggleText { display: none; margin-top: 15px; }
+  </style>
+</head>
+<body>
+  <h1>Five Button Demo</h1>
+  <button id="btnAlert">Show Alert</button>
+  <button id="btnBg">Change Background</button>
+  <button id="btnTime">Show Current Time</button>
+  <button id="btnJoke">Fetch Random Joke</button>
+  <button id="btnToggle">Toggle Text</button>
+
+  <div id="output"></div>
+  <div id="toggleText">This text can be toggled on/off.</div>
+
+  <script>
+    // 1. Simple alert
+    document.getElementById('btnAlert').addEventListener('click', () => {
+      alert('Hello! This is an alert from Button 1.');
+    });
+
+    // 2. Change background color randomly
+    document.getElementById('btnBg').addEventListener('click', () => {
+      const colors = ['#f2d7d5', '#d5f2e3', '#d5e3f2', '#f2e5d5', '#e5d5f2'];
+      document.body.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+    });
+
+    // 3. Show current time
+    document.getElementById('btnTime').addEventListener('click', () => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString();
+      document.getElementById('output').innerText = `Current time: ${timeStr}`;
+    });
+
+    // 4. Fetch a random joke from an external API
+    document.getElementById('btnJoke').addEventListener('click', async () => {
+      try {
+        const res = await fetch('https://official-joke-api.appspot.com/random_joke');
+        const data = await res.json();
+        document.getElementById('output').innerText = `${data.setup} – ${data.punchline}`;
+      } catch (e) {
+        document.getElementById('output').innerText = 'Failed to fetch joke.';
+      }
+    });
+
+    // 5. Toggle visibility of a text block
+    document.getElementById('btnToggle').addEventListener('click', () => {
+      const el = document.getElementById('toggleText');
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    });
+  </script>
+</body>
+</html>

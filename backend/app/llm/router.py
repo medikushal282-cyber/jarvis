@@ -274,7 +274,13 @@ def extract_thoughts(raw_text: str) -> Tuple[str, Optional[str]]:
         return cleaned_text, thought_text
     return raw_text.strip(), None
 
-def call_litellm(system: str, user: str, model: str, provider: str = "groq") -> str:
+def call_litellm(
+    system: str,
+    user: str,
+    model: str,
+    provider: str = "groq",
+    tools: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     import litellm
     prov = (provider or "groq").lower()
     model_str = model or "openai/gpt-oss-120b"
@@ -292,41 +298,151 @@ def call_litellm(system: str, user: str, model: str, provider: str = "groq") -> 
         if not model_str.startswith("anthropic/"):
             model_str = f"anthropic/{model_str}"
     
-    response = litellm.completion(
-        model=model_str,
-        messages=[
+    kwargs: Dict[str, Any] = {
+        "model": model_str,
+        "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user}
+            {"role": "user", "content": user},
         ]
-    )
-    return response.choices[0].message.content or ""
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    try:
+        response = litellm.completion(**kwargs)
+        
+        usage = getattr(response, "usage", None)
+        if usage:
+            p_tokens = getattr(usage, "prompt_tokens", 0)
+            c_tokens = getattr(usage, "completion_tokens", 0)
+            t_tokens = getattr(usage, "total_tokens", 0)
+            print(f"[TOKEN USAGE] Model: {model_str} | Prompt: {p_tokens} | Completion: {c_tokens} | Total: {t_tokens}")
+
+        message = response.choices[0].message
+        
+        # Check for native function / tool calls
+        tool_calls = getattr(message, "tool_calls", None)
+        content = message.content or ""
+
+        if tool_calls:
+            rendered_calls = []
+            for tc in tool_calls:
+                fn = getattr(tc, "function", None)
+                if fn:
+                    fn_name = getattr(fn, "name", "")
+                    fn_args = getattr(fn, "arguments", "{}")
+                    try:
+                        parsed_args = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
+                    except Exception:
+                        parsed_args = {"raw": str(fn_args)}
+                    rendered_calls.append(f"<tool_call>\n{json.dumps({'name': fn_name, 'arguments': parsed_args})}\n</tool_call>")
+            
+            tool_str = "\n".join(rendered_calls)
+            return f"{content}\n{tool_str}".strip() if content else tool_str
+
+        return content
+    except Exception as exc:
+        # Handle Groq's failed_generation if model generated a tool format string
+        err_msg = str(exc)
+        if "failed_generation" in err_msg:
+            try:
+                match = re.search(r'"failed_generation":\s*"({.*?})"', err_msg)
+                if match:
+                    raw_json_str = match.group(1).encode().decode('unicode-escape')
+                    return f"<tool_call>\n{raw_json_str}\n</tool_call>"
+            except Exception:
+                pass
+        raise exc
+
 
 def call_llm(
     system: str,
     user: str,
     model: str = "openai/gpt-oss-120b",
-    provider: str = "groq"
+    provider: str = "groq",
+    tools: Optional[List[Dict[str, Any]]] = None,
+    emit: Optional[Any] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Unified LLM router using LiteLLM to route to Groq, Ollama, OpenAI, or Anthropic.
+    Now acts as the LLM Worker Gateway.
     """
-    raw_response = ""
-    prov = (provider or "groq").lower()
+    from app.llm.workers import load_workers, mark_worker_error, mark_worker_used
+    import time
     
-    try:
-        raw_response = call_litellm(system, user, model, prov)
-    except Exception as e:
-        # Graceful fallback to default active Groq model if configured
-        if os.environ.get("GROQ_API_KEY"):
+    workers = load_workers()
+    now = time.time()
+    
+    healthy_workers = [w for w in workers if w.get("enabled", True) and w.get("cooldown_until", 0) <= now]
+    healthy_workers.sort(key=lambda x: x.get("priority", 0), reverse=True)
+    
+    if not healthy_workers:
+        # Fallback to standard environment keys if NO workers configured at all
+        if not workers:
             try:
-                raw_response = call_litellm(system, user, "openai/gpt-oss-120b", "groq")
-            except Exception:
-                try:
-                    raw_response = call_litellm(system, user, "qwen/qwen3.8-27b", "groq")
-                except Exception:
-                    raise e
+                raw_response = call_litellm(system, user, model, provider, tools=tools)
+                return extract_thoughts(raw_response)
+            except Exception as e:
+                raise Exception(f"LLM provider error: {e}")
         else:
-            raise e
-
-    return extract_thoughts(raw_response)
+            raise Exception("JARVIS couldn't complete this task because all configured execution workers are currently unavailable.")
+            
+    last_err = None
+    for w in healthy_workers:
+        wid = w["worker_id"]
+        w_model = w["model"]
+        w_prov = w["provider"]
+        api_key = w.get("api_key")
+        
+        if emit:
+            emit("worker_switching", {"message": f"Switching execution worker to {w_prov} ({w_model})..."}, node="agent")
+            
+        try:
+            env_key = f"{w_prov.upper()}_API_KEY"
+            old_key = os.environ.get(env_key)
+            if api_key:
+                os.environ[env_key] = api_key
+                
+            raw_response = call_litellm(system, user, w_model, w_prov, tools=tools)
+            
+            if api_key:
+                if old_key is not None:
+                    os.environ[env_key] = old_key
+                else:
+                    del os.environ[env_key]
+                
+            mark_worker_used(wid)
+            if emit:
+                emit("worker_connected", {"message": "Worker connected — continuing."}, node="agent")
+            return extract_thoughts(raw_response)
+            
+        except Exception as e:
+            last_err = e
+            if api_key:
+                if old_key is not None:
+                    os.environ[env_key] = old_key
+                elif env_key in os.environ:
+                    del os.environ[env_key]
+            
+            err_str = str(e).lower()
+            if any(k in err_str for k in ["rate_limit", "429", "timeout", "connection", "overloaded", "groqexception"]):
+                import re
+                cooldown_s = 30
+                try:
+                    match = re.search(r'try again in (\d+\.?\d*)s', err_str)
+                    if match:
+                        cooldown_s = int(float(match.group(1))) + 2
+                except Exception:
+                    pass
+                mark_worker_error(wid, str(e), cooldown_s)
+                if emit:
+                    emit("worker_cooldown", {"worker_id": wid, "reason": "rate_limit", "cooldown_s": cooldown_s}, node="agent")
+            else:
+                mark_worker_error(wid, str(e), 60)
+                if emit:
+                    emit("worker_failed", {"worker_id": wid, "reason": "execution_failed"}, node="agent")
+            continue
+            
+    raise Exception("JARVIS couldn't complete this task because all configured execution workers are currently unavailable.")
 

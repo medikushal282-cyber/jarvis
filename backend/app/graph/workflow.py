@@ -26,6 +26,9 @@ from app.graph.nodes.executor import executor_node
 from app.graph.nodes.validator import validator_node
 from app.graph.nodes.recovery import recovery_node
 
+from app.attachments import get_attachment_manager, AttachmentStatus, Attachment
+from app.vision import get_vision_service
+
 nodes = {
     "orchestrator": orchestrator_node,
     "researcher": researcher_node,
@@ -34,9 +37,64 @@ nodes = {
     "recovery": recovery_node
 }
 
+def classify_attachment_query(objective: str) -> str:
+    """
+    Classifies user intent regarding conversation attachments:
+    - 'METADATA': User is asking what file/image was sent, filename, size, dimensions.
+    - 'VISUAL': User is asking for visual description, scene, objects, actions, what is happening.
+    - 'OTHER': General query.
+    """
+    obj = objective.strip().lower()
+
+    metadata_patterns = [
+        r"what (image|file|picture|photo|attachment) did i (send|upload|attach)",
+        r"what (was|is) the (image|file|picture|photo|attachment) (i sent|i uploaded|i attached)",
+        r"what is the (filename|file name|name of the (file|image|photo|picture))",
+        r"what('?s| is) (the )?(filename|file name)",
+        r"what (file|attachment) is this",
+        r"show (me )?(the )?metadata",
+        r"what is the (size|filesize|mime|type|format) of",
+        r"how (big|large) is the (file|image)",
+        r"^what image\??$",
+        r"^what file\??$"
+    ]
+    if any(re.search(p, obj) for p in metadata_patterns):
+        return "METADATA"
+
+    visual_patterns = [
+        r"what is happening in (this|the) (image|picture|photo)",
+        r"what('?s| is) happening in (this|the) (image|picture|photo)",
+        r"what is (this|the) (image|picture|photo) (about|showing)",
+        r"what does (this|the) (image|picture|photo) (show|contain|look like)",
+        r"describe (this|the) (image|picture|photo)",
+        r"what (do you see|can you see|is visible|is in) (in|on) (this|the) (image|picture|photo)",
+        r"what (is|are) in (this|the) (image|picture|photo)",
+        r"who is in (this|the) (image|picture|photo)",
+        r"what does (this|the) (image|picture|photo) (show|contain|look like)",
+        r"analyze (this|the) (image|picture|photo)",
+        r"explain (this|the) (image|picture|photo)",
+        r"tell me about (this|the) (image|picture|photo)",
+        r"inspect (this|the) (image|picture|photo)",
+        r"what text is in (this|the) (image|picture|photo)",
+        r"read (the )?text in (this|the) (image|picture|photo)",
+        r"look at (this|the) (image|picture|photo)"
+    ]
+    if any(re.search(p, obj) for p in visual_patterns):
+        return "VISUAL"
+
+    return "OTHER"
+
 def is_code_execution_objective(objective: str) -> bool:
     obj_lower = objective.strip().lower()
     cleaned = re.sub(r'[^\w\s\.\-]', '', obj_lower).strip()
+
+    # Attachment / image queries must not trigger code execution DAG
+    if classify_attachment_query(obj_lower) in ["METADATA", "VISUAL"]:
+        return False
+
+    image_cues = ["image", "picture", "photo", "screenshot", "attachment", "what image", "what file did i"]
+    if any(q in obj_lower for q in image_cues) and not any(w in obj_lower for w in ["create", "write", "build", "script", "generate code", "run_command"]):
+        return False
 
     # Casual greetings
     greetings = {"hi", "hello", "hey", "hola", "sup", "greetings", "good morning", "good evening", "good afternoon", "howdy"}
@@ -62,7 +120,7 @@ def is_code_execution_objective(objective: str) -> bool:
         "create", "write", "build", "make", "generate", "code", "run", "execute", 
         "script", "test", "delete", "remove", "update", "modify", "refactor",
         "open", "browser", "html", "css", "python", ".py", ".html", 
-        ".js", ".json", ".csv", ".txt", ".md", "list files", "dir", "inspect", "show files"
+        ".js", ".json", ".csv", ".txt", ".md", "list files", "dir", "inspect runtime", "show files"
     ]
     return any(cue in obj_lower for cue in action_cues)
 
@@ -141,6 +199,132 @@ async def execute_run_task(
         "objective": objective
     })
 
+    # Resolve all attachments for this conversation session
+    attachment_mgr = get_attachment_manager()
+    session_attachments = attachment_mgr.get_attachments_for_session(conversation_id) if conversation_id else []
+    if not session_attachments and attachments:
+        for a_dict in attachments:
+            aid = a_dict.get("attachment_id") or a_dict.get("id")
+            if aid:
+                a_obj = attachment_mgr.get_attachment(aid)
+                if a_obj and a_obj not in session_attachments:
+                    session_attachments.append(a_obj)
+
+    # --- DYNAMIC MULTIMODAL ATTACHMENT INTENT ROUTING ---
+    att_intent = classify_attachment_query(objective)
+    
+    if att_intent == "METADATA":
+        runs_db[run_id]["type"] = "chat"
+        state["mode"] = "chat"
+        
+        if not session_attachments:
+            chat_reply = "No attachments or uploaded files were found in this conversation session."
+        else:
+            lines = ["Here is the metadata for your uploaded attachment(s):\n"]
+            for a in session_attachments:
+                dims_str = f"{a.dimensions[0]}x{a.dimensions[1]}" if a.dimensions else "N/A"
+                size_str = f"{a.size} bytes ({a.size / 1024:.1f} KB)" if a.size > 0 else "0 bytes (Empty)"
+                lines.append(f"- **Filename**: `{a.filename}`\n  - **MIME Type**: `{a.mime_type}`\n  - **Size**: {size_str}\n  - **Dimensions**: {dims_str}\n  - **Status**: `{a.status.value}`")
+            chat_reply = "\n".join(lines)
+            
+        chat_thought = f"Returned metadata for {len(session_attachments)} conversation attachment(s) without invoking visual perception."
+        thought_payload = {
+            "node": "attachment_manager",
+            "phase": "Metadata Inspection",
+            "title": "Attachment Metadata",
+            "thought": chat_thought,
+            "model": model,
+            "provider": provider,
+            "timestamp": time.time()
+        }
+        state.setdefault("thoughts", []).append(thought_payload)
+        await emit(run_id, "thought_generated", "attachment_manager", thought_payload)
+        await emit(run_id, "chat_response", "assistant", {"text": chat_reply, "objective": objective})
+        state["final_response"] = chat_reply
+        state["status"] = "completed"
+        runs_db[run_id]["status"] = "completed"
+        runs_db[run_id]["state"] = state
+        if workspace_id and conversation_id:
+            try:
+                from app.api.sandbox import save_conversation_turn
+                save_conversation_turn(workspace_id, conversation_id, objective, chat_reply)
+            except Exception as e:
+                print(f"Error persisting chat turn: {e}")
+        if on_complete:
+            on_complete({"role": "user", "text": objective, "reply": chat_reply})
+        await emit(run_id, "run_completed", "assistant", {"status": "completed", "type": "chat", "reply": chat_reply, "summary": chat_reply})
+        return
+
+    elif att_intent == "VISUAL":
+        runs_db[run_id]["type"] = "chat"
+        state["mode"] = "chat"
+        
+        # Check if we have image attachments
+        image_attachments = [a for a in session_attachments if a.is_image or a.mime_type.startswith("image/")]
+        
+        if not session_attachments:
+            chat_reply = "No image attachments were found in this conversation session. Please upload or attach an image to analyze."
+            chat_thought = "Visual analysis requested but no attachments found in conversation. Did NOT search workspace filesystem."
+        elif not image_attachments:
+            non_img = session_attachments[0]
+            chat_reply = f"The attached file '{non_img.filename}' is of type '{non_img.mime_type}', which is not a recognized image format. Visual inspection cannot be performed on non-image files."
+            chat_thought = f"Non-image attachment provided: {non_img.filename} ({non_img.mime_type})"
+        else:
+            target_img = image_attachments[-1]
+            
+            if target_img.status == AttachmentStatus.EMPTY_FILE or target_img.size == 0:
+                chat_reply = f"Cannot access image data: the attachment '{target_img.filename}' is empty (0 bytes). JARVIS cannot infer or guess what an empty image contains."
+                chat_thought = f"Image attachment {target_img.filename} is 0 bytes. Refusing to guess visual content."
+            elif target_img.status == AttachmentStatus.INACCESSIBLE or (not target_img.data_url and not target_img.raw_bytes):
+                chat_reply = f"Cannot access image data: attachment '{target_img.filename}' has no accessible content reference."
+                chat_thought = f"Image attachment {target_img.filename} content is inaccessible."
+            elif target_img.status == AttachmentStatus.CORRUPTED:
+                chat_reply = f"Cannot analyze image: '{target_img.filename}' contains invalid or corrupted image data."
+                chat_thought = f"Image attachment {target_img.filename} is corrupted."
+            else:
+                # Perform actual visual analysis using VisionService
+                vision_service = get_vision_service()
+                res = await asyncio.to_thread(
+                    vision_service.analyze_image,
+                    target_img,
+                    prompt=objective,
+                    model=model,
+                    provider=provider
+                )
+                if res.success:
+                    chat_reply = res.description
+                    chat_thought = f"Visual analysis performed using {res.model} ({res.provider}) on actual image pixels. Grounded visual description generated."
+                else:
+                    chat_reply = f"Visual analysis unavailable: {res.message}"
+                    chat_thought = f"Visual analysis failed ({res.error_code}): {res.message}"
+
+        thought_payload = {
+            "node": "vision",
+            "phase": "Visual Perception",
+            "title": "Multimodal Visual Inspection",
+            "thought": chat_thought,
+            "model": model,
+            "provider": provider,
+            "timestamp": time.time()
+        }
+        state.setdefault("thoughts", []).append(thought_payload)
+        await emit(run_id, "thought_generated", "vision", thought_payload)
+        await emit(run_id, "chat_response", "assistant", {"text": chat_reply, "objective": objective})
+        state["final_response"] = chat_reply
+        state["status"] = "completed"
+        runs_db[run_id]["status"] = "completed"
+        runs_db[run_id]["state"] = state
+        if workspace_id and conversation_id:
+            try:
+                from app.api.sandbox import save_conversation_turn
+                save_conversation_turn(workspace_id, conversation_id, objective, chat_reply)
+            except Exception as e:
+                print(f"Error persisting chat turn: {e}")
+        if on_complete:
+            on_complete({"role": "user", "text": objective, "reply": chat_reply})
+        await emit(run_id, "run_completed", "assistant", {"status": "completed", "type": "chat", "reply": chat_reply, "summary": chat_reply})
+        return
+
     # --- DYNAMIC INTENT ROUTING: CONVERSATIONAL VS FULL AGENTIC DAG ---
     if not is_code_execution_objective(objective):
         runs_db[run_id]["type"] = "chat"
@@ -167,13 +351,20 @@ async def execute_run_task(
             "Do NOT output JSON plans, tool steps, or markdown fences when answering conversational queries."
         )
 
-        # Inject attached file contents so the LLM can see them
-        if attachments:
-            system_prompt += "\n\n[User Attached Files]:\n"
-            for att in attachments:
-                name = att.get('name', 'unknown')
-                content = att.get('content', '')[:4000]  # Cap at 4k chars per file
-                system_prompt += f"--- {name} ---\n{content}\n---\n"
+        # Inject attached file contents or image metadata properly
+        if session_attachments:
+            system_prompt += "\n\n[User Attached Files / Input Artifacts]:\n"
+            for att in session_attachments:
+                if att.is_image:
+                    dims_str = f"{att.dimensions[0]}x{att.dimensions[1]}" if att.dimensions else "unknown"
+                    system_prompt += (
+                        f"--- Image Attachment: {att.filename} ---\n"
+                        f"MIME: {att.mime_type} | Size: {att.size} bytes | Dimensions: {dims_str} | Status: {att.status.value}\n"
+                        f"(Note: Visual content is grounded in pixels via Vision Perception. Do not guess contents from filename.)\n---\n"
+                    )
+                elif att.text_content:
+                    content = att.text_content[:4000]
+                    system_prompt += f"--- File Attachment: {att.filename} ---\n{content}\n---\n"
 
         try:
             chat_reply, chat_thought = await asyncio.to_thread(
