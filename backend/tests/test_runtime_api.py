@@ -4,6 +4,7 @@ Runs against the real FastAPI app with the null agent runner, so there is no
 LLM call, no network and no workspace mutation.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -19,6 +20,32 @@ os.environ["JARVIS_SSE_HEARTBEAT_S"] = "1"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+
+
+def read_messages(stream, stop_on_terminal=True):
+    """Collect frames the way a browser EventSource.onmessage sees them.
+
+    onmessage only receives frames without an ``event:`` field, so a named
+    frame here is a failure, not something to skip.
+    """
+    out = []
+    pending_name = None
+    for line in stream.iter_lines():
+        if line.startswith("event:"):
+            pending_name = line.split(":", 1)[1].strip()
+        elif line.startswith("data:"):
+            if pending_name is not None:
+                raise AssertionError(
+                    f"named SSE frame {pending_name!r} would never reach onmessage"
+                )
+            out.append(json.loads(line.split(":", 1)[1]))
+            if stop_on_terminal and out[-1]["event"] in (
+                "run_completed", "run_failed", "run_cancelled"
+            ):
+                break
+        elif line == "":
+            pending_name = None
+    return out
 
 
 class ApiTestCase(unittest.TestCase):
@@ -125,12 +152,7 @@ class TestRunFlow(ApiTestCase):
 
         # The null runner completes immediately; the SSE stream drains it.
         with self.client.stream("GET", f"/api/runs/{run_id}/events") as stream:
-            frames = []
-            for line in stream.iter_lines():
-                if line.startswith("event:"):
-                    frames.append(line.split(":", 1)[1].strip())
-                if frames and frames[-1] in ("run_completed", "run_failed"):
-                    break
+            frames = [m["event"] for m in read_messages(stream)]
         self.assertIn("run_started", frames)
         self.assertIn("run_completed", frames)
 
@@ -155,9 +177,7 @@ class TestRunFlow(ApiTestCase):
         ).json()["run_id"]
 
         with self.client.stream("GET", f"/api/runs/{run_id}/events") as s:
-            for line in s.iter_lines():
-                if line.startswith("event: run_completed"):
-                    break
+            read_messages(s)
 
         # Reconnect as a browser would, asking for everything after seq 1.
         res = self.client.get(f"/api/runs/{run_id}/events?from_seq=1")
@@ -169,6 +189,31 @@ class TestRunFlow(ApiTestCase):
         ]
         self.assertTrue(seqs, "resumed stream must carry event ids")
         self.assertTrue(all(s > 1 for s in seqs), f"no duplicates expected: {seqs}")
+
+    def test_frames_reach_a_browser_onmessage_handler(self):
+        """Regression: named frames never reach EventSource.onmessage.
+
+        The page showed "Lost connection to backend execution stream" on
+        every prompt while the backend completed the run fine.
+        """
+        sid = self.new_session()
+        run_id = self.client.post(
+            f"/api/sessions/{sid}/runs", json={"objective": "hello"}
+        ).json()["run_id"]
+
+        res = self.client.get(f"/api/runs/{run_id}/events")
+        self.assertFalse(
+            any(line.startswith("event:") for line in res.text.splitlines()),
+            "named SSE frames never reach EventSource.onmessage",
+        )
+        messages = [
+            json.loads(l.split(":", 1)[1])
+            for l in res.text.splitlines()
+            if l.startswith("data:")
+        ]
+        names = [m["event"] for m in messages]
+        self.assertIn("run_started", names)
+        self.assertEqual(names[-1], "run_completed")
 
     def test_missing_run_is_404(self):
         self.assertEqual(self.client.get("/api/runs/run_nope/result").status_code, 404)

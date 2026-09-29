@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * Push-to-talk control with a live level meter.
+ * Talk button for the composer toolbar.
  *
- * Hold to talk, release to send -- or click to toggle, since holding a mouse
- * button while watching a demo is awkward. The VAD ends the utterance on
- * silence either way.
+ * Two ways to use it, both ending the same way:
+ * - hold (mouse, touch or Space), speak, release to send;
+ * - click once, speak, and the silence detector sends it -- or click again.
+ * Pressing it while JARVIS is speaking interrupts the reply.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -17,29 +18,24 @@ interface VoiceButtonProps {
   level: number;
   error: string | null;
   supported: boolean;
+  /** Block new utterances, e.g. while a run is in flight. */
+  disabled?: boolean;
   onStart: () => void;
   onStop: () => void;
   onDismissError?: () => void;
   className?: string;
 }
 
-const BARS = 5;
-
-const LABEL: Record<MicState, string> = {
-  unsupported: "Voice unavailable",
-  denied: "Mic blocked",
-  idle: "Hold to talk",
-  listening: "Listening...",
-  transcribing: "Transcribing...",
-  speaking: "JARVIS speaking",
-  error: "Voice error",
-};
+const BARS = 4;
+/** A press shorter than this is a click (toggle), longer is a hold. */
+const CLICK_MS = 350;
 
 export const VoiceButton: React.FC<VoiceButtonProps> = ({
   state,
   level,
   error,
   supported,
+  disabled = false,
   onStart,
   onStop,
   onDismissError,
@@ -47,28 +43,38 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
 }) => {
   const [held, setHeld] = useState(false);
   const holdRef = useRef(false);
+  const pressedAtRef = useRef(0);
 
-  const disabled = !supported || state === "unsupported" || state === "denied";
-  const active = state === "listening";
+  const unavailable = !supported || state === "unsupported" || state === "denied";
+  const listening = state === "listening";
   const busy = state === "transcribing";
+  const blocked = unavailable || busy || (disabled && !listening);
 
   const begin = useCallback(() => {
-    if (disabled || busy) return;
+    if (blocked) return;
+    // Second click while listening in toggle mode: send now.
+    if (listening && !holdRef.current) {
+      onStop();
+      return;
+    }
     holdRef.current = true;
+    pressedAtRef.current = performance.now();
     setHeld(true);
     onStart();
-  }, [disabled, busy, onStart]);
+  }, [blocked, listening, onStart, onStop]);
 
   const end = useCallback(() => {
     if (!holdRef.current) return;
     holdRef.current = false;
     setHeld(false);
+    // A quick click keeps listening; the silence detector or a second click ends it.
+    if (performance.now() - pressedAtRef.current < CLICK_MS) return;
     onStop();
   }, [onStop]);
 
-  // Space is push-to-talk, unless the user is typing.
+  // Space is push-to-talk, unless the user is typing somewhere.
   useEffect(() => {
-    if (disabled) return;
+    if (unavailable) return;
 
     const isTyping = (t: EventTarget | null) => {
       const el = t as HTMLElement | null;
@@ -76,6 +82,7 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
         !!el &&
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
           el.isContentEditable)
       );
     };
@@ -97,86 +104,100 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [begin, end, disabled]);
+  }, [begin, end, unavailable]);
 
   const normalized = Math.min(1, level / 0.08);
 
+  let label: string;
+  if (state === "unsupported") label = "No mic";
+  else if (state === "denied") label = "Mic blocked";
+  else if (busy) label = "Transcribing...";
+  else if (listening) label = held ? "Release to send" : "Listening - click to send";
+  else if (state === "speaking") label = "Speaking - press to interrupt";
+  else if (disabled) label = "Voice";
+  else label = "Talk";
+
+  const tone = unavailable
+    ? "border-neutral-400 bg-neutral-200 text-neutral-400 cursor-not-allowed"
+    : listening
+      ? "border-black bg-red-500 text-white"
+      : busy
+        ? "border-black bg-fra-yellow text-black animate-pulse cursor-wait"
+        : state === "speaking"
+          ? "border-black bg-black text-fra-yellow"
+          : disabled
+            ? "border-neutral-400 bg-white text-neutral-400 cursor-not-allowed"
+            : "border-black bg-white text-black hover:bg-fra-yellow";
+
   return (
-    <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          disabled={disabled || busy}
-          onMouseDown={begin}
-          onMouseUp={end}
-          onMouseLeave={end}
-          onTouchStart={(e) => {
-            e.preventDefault();
-            begin();
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            end();
-          }}
-          aria-label={LABEL[state]}
-          aria-pressed={active}
-          title={disabled ? "Voice unavailable - use the text box" : "Hold to talk (or hold Space)"}
-          className={[
-            "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
-            disabled
-              ? "cursor-not-allowed border-neutral-700 bg-neutral-900 text-neutral-600"
-              : active
-                ? "border-red-500 bg-red-500/20 text-red-400 scale-105"
-                : busy
-                  ? "border-amber-500 bg-amber-500/10 text-amber-400 animate-pulse"
-                  : "border-neutral-600 bg-neutral-900 text-neutral-300 hover:border-cyan-400 hover:text-cyan-300",
-          ].join(" ")}
-        >
-          {active && (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <button
+        type="button"
+        disabled={blocked}
+        onMouseDown={begin}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          begin();
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          end();
+        }}
+        aria-label={label}
+        aria-pressed={listening}
+        title={
+          unavailable
+            ? "Voice unavailable - use the text box"
+            : "Click or hold to talk (or hold Space)"
+        }
+        className={`relative flex h-7 w-7 shrink-0 items-center justify-center border-2 shadow-brutal-sm transition-colors ${tone}`}
+      >
+        {listening && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 border-2 border-red-500"
+            style={{
+              transform: `scale(${1.1 + normalized * 0.5})`,
+              opacity: 0.9 - normalized * 0.5,
+              transition: "transform 80ms linear, opacity 80ms linear",
+            }}
+          />
+        )}
+        <MicGlyph muted={unavailable} />
+      </button>
+
+      {listening && (
+        <div className="flex h-4 items-end gap-[2px]" aria-hidden="true">
+          {Array.from({ length: BARS }).map((_, i) => (
             <span
-              className="absolute inset-0 rounded-full border-2 border-red-500/60"
-              style={{
-                transform: `scale(${1 + normalized * 0.45})`,
-                opacity: 1 - normalized * 0.6,
-                transition: "transform 80ms linear, opacity 80ms linear",
-              }}
+              key={i}
+              className={`w-[3px] transition-all duration-75 ${
+                normalized >= ((i + 1) / BARS) * 0.55 ? "bg-red-500" : "bg-neutral-300"
+              }`}
+              style={{ height: `${5 + i * 3}px` }}
             />
-          )}
-          <MicGlyph muted={disabled} />
-        </button>
-
-        <div className="flex h-6 items-end gap-[3px]" aria-hidden="true">
-          {Array.from({ length: BARS }).map((_, i) => {
-            const threshold = (i + 1) / BARS;
-            const lit = active && normalized >= threshold * 0.55;
-            return (
-              <span
-                key={i}
-                className={`w-[3px] rounded-sm transition-all duration-75 ${
-                  lit ? "bg-red-400" : "bg-neutral-700"
-                }`}
-                style={{ height: `${6 + i * 3}px` }}
-              />
-            );
-          })}
+          ))}
         </div>
+      )}
 
-        <span
-          className={`text-[11px] uppercase tracking-wider ${
-            active ? "text-red-400" : busy ? "text-amber-400" : "text-neutral-500"
-          }`}
-        >
-          {held ? "Release to send" : LABEL[state]}
-        </span>
-      </div>
+      <span
+        className={`font-mono text-[10px] font-bold uppercase tracking-wide ${
+          listening ? "text-red-600" : "text-neutral-500"
+        }`}
+      >
+        {label}
+      </span>
 
       {error && (
         <button
           type="button"
           onClick={onDismissError}
-          className="self-start text-left text-[11px] text-amber-400/90 hover:text-amber-300"
+          title="Dismiss"
+          className="max-w-[220px] truncate font-mono text-[10px] text-red-600 hover:underline"
         >
-          {error} <span className="text-neutral-600">(dismiss)</span>
+          {error}
         </button>
       )}
     </div>
@@ -185,12 +206,12 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
 
 const MicGlyph: React.FC<{ muted?: boolean }> = ({ muted }) => (
   <svg
-    width="16"
-    height="16"
+    width="14"
+    height="14"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2"
+    strokeWidth="2.5"
     strokeLinecap="round"
     strokeLinejoin="round"
   >

@@ -5,6 +5,8 @@ import ThinkingView, { ThoughtItem } from "@/components/ThinkingView";
 import BrowserPreview from "@/components/BrowserPreview";
 import ModelSelectorModal from "@/components/ModelSelector";
 import FilePickerModal from "@/components/FilePickerModal";
+import { VoiceControl, type VoiceControlHandle } from "@/components/Voice";
+import type { Transcript } from "@/lib/runtime/types";
 
 interface ToolActivity {
   id: string;
@@ -123,6 +125,21 @@ export default function FraidayWorkspace() {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Voice: the control owns the mic; the page only asks it to speak replies.
+  const voiceRef = useRef<VoiceControlHandle>(null);
+
+  // Low-confidence transcripts go into the text box for a check instead of
+  // running straight away -- a misheard instruction can still touch files.
+  const handleTranscript = (transcript: Transcript) => {
+    const text = transcript.text.trim();
+    if (!text) return;
+    if (transcript.confidence != null && transcript.confidence < 0.45) {
+      setInputVal(text);
+      return;
+    }
+    void startRun(text);
+  };
 
   // Fetch real workspace and runtime information from backend on mount
   useEffect(() => {
@@ -303,12 +320,15 @@ export default function FraidayWorkspace() {
     setActivityStream(prev => [...prev, activity]);
   };
 
-  const startRun = async () => {
-    if (!inputVal.trim()) return;
+  // `spoken` is set when the objective came from the mic rather than the text box.
+  const startRun = async (spoken?: string) => {
+    const inputMode: 'text' | 'voice' = spoken !== undefined ? 'voice' : 'text';
+    const objective = spoken ?? inputVal;
+    if (!objective.trim()) return;
     if (runStatus === 'running' || runStatus === 'starting') return;
-    
-    const objective = inputVal;
-    setInputVal("");
+
+    // A spoken instruction leaves whatever is typed in the box alone.
+    if (inputMode === 'text') setInputVal("");
 
     // Read attached files as text before clearing
     const fileAttachments: {name: string; content: string; size: number}[] = [];
@@ -354,6 +374,7 @@ export default function FraidayWorkspace() {
           provider,
           workspace_id: activeWorkspaceId,
           conversation_id: activeConversationId,
+          input_mode: inputMode,
           attachments: fileAttachments.length > 0 ? fileAttachments : undefined
         })
       });
@@ -493,7 +514,14 @@ export default function FraidayWorkspace() {
           } else if (type === 'run_completed') {
             evtSource.close();
             setRunStatus('completed');
-            
+
+            // Answer out loud when the question was asked out loud. The
+            // backend shortens it first: no code blocks, no long paths.
+            if (inputMode === 'voice') {
+              const spokenReply = latestChatText || eventData?.reply || eventData?.summary || '';
+              if (spokenReply) void voiceRef.current?.speak(spokenReply);
+            }
+
             let finalState: any = {};
             try {
               const finalRes = await fetch(`http://localhost:8000/api/runs/${data.run_id}`);
@@ -548,6 +576,9 @@ export default function FraidayWorkspace() {
               title: `${safeNode.toUpperCase()} FAILED: ${safeMsg}`,
               status: 'failed'
             });
+            if (inputMode === 'voice') {
+              void voiceRef.current?.speak(`That didn't work. ${safeMsg}`);
+            }
           }
         } catch (err) {
           console.error("Error parsing SSE frame:", err);
@@ -1146,13 +1177,21 @@ export default function FraidayWorkspace() {
                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                         </button>
                         <button className="hover:text-black font-mono font-bold text-xs" onClick={() => setInputVal(prev => prev + ' ```\n\n```')}>&lt;/&gt;</button>
+                        <span className="h-4 w-px bg-neutral-300" aria-hidden="true" />
+                        <VoiceControl
+                          ref={voiceRef}
+                          sessionId={activeConversationId}
+                          workspaceId={activeWorkspaceId}
+                          disabled={runStatus === 'starting' || runStatus === 'running'}
+                          onTranscript={handleTranscript}
+                        />
                       </div>
                       <div className="flex items-center space-x-2">
                         <span className="text-[10px] text-neutral-500 font-mono hidden sm:inline">Enter to send · Shift+Enter for newline</span>
                         <button 
                           disabled={runStatus === 'starting' || runStatus === 'running'}
                           className={`px-4 py-1.5 text-xs font-bold border-2 border-black flex items-center space-x-1.5 shadow-brutal-sm ${runStatus === 'starting' || runStatus === 'running' ? 'bg-neutral-400 text-neutral-600 cursor-not-allowed' : 'bg-black text-white hover:bg-neutral-800'}`}
-                          onClick={startRun}
+                          onClick={() => startRun()}
                         >
                           <span>{runStatus === 'starting' || runStatus === 'running' ? 'Running...' : 'Send'}</span><span>-&gt;</span>
                         </button>

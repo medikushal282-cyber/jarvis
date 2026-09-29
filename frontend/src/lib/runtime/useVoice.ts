@@ -31,6 +31,8 @@ const SPEECH_THRESHOLD = 0.018;
 const SILENCE_MS = 800;
 /** Anything shorter than this is a cough, not an instruction. */
 const MIN_UTTERANCE_MS = 300;
+/** Stop listening if nobody says anything for this long. */
+const NO_SPEECH_TIMEOUT_MS = 8000;
 
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -89,6 +91,10 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
   const sawSpeechRef = useRef(false);
   const playerRef = useRef<HTMLAudioElement | null>(null);
   const speakingRef = useRef(false);
+  /** True between start() and the recorder actually running (mic prompt). */
+  const startingRef = useRef(false);
+  /** Whether the analyser came up, i.e. whether "no speech heard" is knowable. */
+  const vadRef = useRef(false);
 
   const onTranscriptRef = useRef(onTranscript);
   const onErrorRef = useRef(onError);
@@ -97,11 +103,19 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
     onErrorRef.current = onError;
   }, [onTranscript, onError]);
 
-  const supported =
-    typeof window !== "undefined" &&
-    typeof navigator !== "undefined" &&
-    !!navigator.mediaDevices?.getUserMedia &&
-    typeof MediaRecorder !== "undefined";
+  // Decided after mount, never during render: the server has no microphone
+  // API, and React does not patch attribute mismatches when hydrating, so a
+  // render-time check left the button stuck as disabled in the browser.
+  const [supported, setSupported] = useState(false);
+
+  useEffect(() => {
+    const ok =
+      typeof navigator !== "undefined" &&
+      !!navigator.mediaDevices?.getUserMedia &&
+      typeof MediaRecorder !== "undefined";
+    setSupported(ok);
+    if (!ok) setState("unsupported");
+  }, []);
 
   useEffect(() => {
     voiceApi
@@ -109,10 +123,6 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
       .then(setConfig)
       .catch(() => setConfig(null));
   }, []);
-
-  useEffect(() => {
-    if (!supported) setState("unsupported");
-  }, [supported]);
 
   const fail = useCallback((message: string) => {
     setError(message);
@@ -185,6 +195,12 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
       ) {
         void finish();
         return;
+      } else if (
+        !sawSpeechRef.current &&
+        now - startedAtRef.current > NO_SPEECH_TIMEOUT_MS
+      ) {
+        void finish();
+        return;
       }
 
       rafRef.current = requestAnimationFrame(tick);
@@ -201,8 +217,11 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
       fail("Speech-to-text is switched off on the server.");
       return;
     }
-    if (recorderRef.current?.state === "recording") return;
+    if (recorderRef.current?.state === "recording" || startingRef.current) return;
 
+    // Pressing talk while JARVIS is speaking interrupts it.
+    stopSpeaking();
+    startingRef.current = true;
     setError(null);
     setTranscript(null);
 
@@ -218,6 +237,7 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
       });
     } catch (cause: any) {
       const denied = cause?.name === "NotAllowedError" || cause?.name === "SecurityError";
+      startingRef.current = false;
       setState(denied ? "denied" : "error");
       const message = denied
         ? "Microphone access denied. You can still type."
@@ -242,10 +262,12 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
       analyser.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(analyser);
       analyserRef.current = analyser;
+      vadRef.current = true;
       monitor();
     } catch {
       // Without an analyser there is no VAD; push-to-talk still works.
       analyserRef.current = null;
+      vadRef.current = false;
     }
 
     const mimeType = pickMimeType();
@@ -268,6 +290,12 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
 
       if (elapsed < MIN_UTTERANCE_MS || blob.size < 1024) {
         setState("idle");
+        return;
+      }
+      if (vadRef.current && !sawSpeechRef.current) {
+        // Nothing but room noise: don't spend a transcription on it.
+        setState("idle");
+        setError("I didn't hear anything.");
         return;
       }
       if (config && blob.size > config.max_audio_bytes) {
@@ -300,8 +328,9 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
     }, maxMs);
 
     recorder.start(250);
+    startingRef.current = false;
     setState("listening");
-  }, [supported, config, monitor, teardownCapture, fail, finish, sessionId, workspaceId]);
+  }, [supported, config, monitor, teardownCapture, fail, finish, stopSpeaking, sessionId, workspaceId]);
 
   const speak = useCallback(
     async (text: string) => {
