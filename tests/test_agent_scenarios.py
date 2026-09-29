@@ -81,7 +81,7 @@ def run_scenario(
             {"type": "function", "function": {"name": n, "description": "mock", "parameters": {}}}
             for n in tool_results
         ]),
-        patch("app.agent.permissions.get_permission_engine") as mock_perm,
+        patch("app.agent.loop.get_permission_engine") as mock_perm,
     ):
         mock_ws.return_value.get_runtime_info.return_value = {"python": {"version": "3.11", "executable": "python"}}
 
