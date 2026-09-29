@@ -102,6 +102,8 @@ class AgentRunner(Protocol):
 
 Rules:
 
+- The runtime may put its own events on the stream before the brain starts
+  (today: `voice_transcribed` for spoken requests).
 - The brain **must** emit `run_started` first and exactly one terminal event
   (`run_completed` or `run_failed`) last. The runtime enforces this — if `run()`
   returns or raises without a terminal event, the runtime synthesises one.

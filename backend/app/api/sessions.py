@@ -69,6 +69,8 @@ class StartRunRequest(BaseModel):
     workspace_id: Optional[str] = None
     attachments: Optional[List[AttachmentItem]] = None
     audio_url: Optional[str] = None
+    #: Transcript details when input_mode is "voice" (confidence, duration_s, ...).
+    voice: Optional[Dict[str, Any]] = None
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -286,6 +288,7 @@ async def start_session_run(session_id: str, req: StartRunRequest, request: Requ
             execution_mode=req.execution_mode,
             attachments=[a.model_dump() for a in (req.attachments or [])],
             audio_url=req.audio_url,
+            voice=req.voice,
         )
     except ValueError as exc:
         raise _bad_request(exc)

@@ -28,7 +28,7 @@ back to `core` needs no UI change.
 | 2 | Permissions and Turbo | Next — needs 3.5 sign-off from Nikunj and Lohit |
 | 3 | Worker panel and switching | **Done** |
 | 4 | Artifacts and preview | **Done** |
-| 5 | Voice end to end | |
+| 5 | Voice end to end | **Done** |
 | 6 | Acceptance tests | |
 
 ---
@@ -112,7 +112,17 @@ Blocked on others: the filesystem tool's `artifact_created` never arrives
 - Strip filesystem paths from every API response; secure URLs only.
 - "Open Preview" for sites, opening `BrowserPreview` inside JARVIS.
 
-## Phase 5 — Voice end to end
+## Phase 5 — Voice end to end (done)
+
+Shipped: Whisper model ids verified against Groq's live list (dead fallback
+removed); server TTS repointed from the retired PlayAI to Orpheus (needs a
+one-time terms acceptance by the Groq org admin); a visible voice indicator
+LISTENING → TRANSCRIBING → EXECUTING → SPEAKING → IDLE; `voice_transcribed`
+on voice runs with the transcript's confidence kept on the turn. Fixed: run
+attachments were accepted and then dropped before reaching the brain.
+Verified with a real Whisper call and `scripts/e2e_voice.py` (a WAV as the
+browser microphone, 10 checks); a headless browser's missing TTS voices do
+not fail the run. `voice_spoken` is not emitted (speech is client-side).
 
 - A real Whisper round trip with a real key; confirm the model ids.
 - Visible LISTENING → EXECUTING → SPEAKING → IDLE state.

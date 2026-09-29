@@ -24,6 +24,8 @@ export interface StartRunOptions {
   provider?: string;
   attachments?: Array<{ name: string; content: string; size?: number }>;
   audioUrl?: string | null;
+  /** Transcript details for a spoken request. */
+  voice?: { confidence?: number; duration_s?: number; model?: string; language?: string };
 }
 
 export interface RunHandle {
@@ -70,17 +72,17 @@ export function useRun(onFinished?: (view: RunView) => void): RunHandle {
     if (finishedRef.current === view.runId) return;
     finishedRef.current = view.runId;
 
-    const runId = view.runId;
-    const snapshot = view;
+    // The caller's hook first (speaking the reply shouldn't wait on a fetch),
+    // then the artifacts the result adds.
+    onFinishedRef.current?.(view);
     runs
-      .result(runId)
+      .result(view.runId)
       .then((result) => {
         if (result?.artifacts?.length) {
           dispatch({ type: "result_artifacts", artifacts: result.artifacts });
         }
       })
-      .catch(() => undefined)
-      .finally(() => onFinishedRef.current?.(snapshot));
+      .catch(() => undefined);
   }, [view]);
 
   const start = useCallback(async (opts: StartRunOptions) => {
@@ -106,6 +108,7 @@ export function useRun(onFinished?: (view: RunView) => void): RunHandle {
         workspace_id: opts.workspaceId ?? undefined,
         attachments: opts.attachments?.length ? opts.attachments : undefined,
         audio_url: opts.audioUrl ?? undefined,
+        voice: opts.voice,
       });
 
       dispatch({ type: "dispatched", runId: res.run_id });

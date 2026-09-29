@@ -67,11 +67,14 @@ fast, which matters more than accuracy here: the gap between "stop talking" and
 
 - Endpoint shape: `POST https://api.groq.com/openai/v1/audio/transcriptions`,
   multipart, `model` + `file`.
-- **Confirm the exact model id against the live catalog before wiring it.**
-  `backend/app/llm/router.py` already fetches Groq's model list; extend that
-  call rather than hardcoding a guess. Whisper large v3 and its turbo/distil
-  variants are the ones to look for.
+- **Models (checked against Groq's live list, 2026-09-29):**
+  `whisper-large-v3-turbo`, falling back to `whisper-large-v3`.
+  `distil-whisper-large-v3-en` is not offered and was removed.
 - Reuse `GROQ_API_KEY`, already in `.env`.
+- **Verified for real:** a spoken sentence came back as "Create numbers.text
+  containing 1, 2, 3, and then read it." in 0.93 s at confidence 0.77, and
+  `scripts/e2e_voice.py` drives the whole loop through the actual UI with a
+  WAV file as the browser's microphone.
 
 Why server-side rather than the browser's `SpeechRecognition` API: the Web
 Speech API is Chromium-only, silently streams audio to Google, gives no
@@ -85,8 +88,12 @@ dependency, and works today. Wire the `TextToSpeech` Protocol at the same time
 but leave the server implementation behind a config flag.
 
 Upgrade path, in order of preference if there is time:
-1. Groq's hosted TTS (PlayAI voices) — same key, same client, verify the model
-   id the same way.
+1. Groq's hosted TTS, `JARVIS_TTS_BACKEND=groq`. PlayAI is no longer offered;
+   the current model is `canopylabs/orpheus-v1-english` (voices `troy`,
+   `hannah`, `austin`; WAV output), now the default. **The Groq org admin must
+   accept its terms once** at
+   https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english
+   before it will answer; until then the API returns `model_terms_required`.
 2. ElevenLabs — best quality, costs money, needs another key.
 3. Piper / local — offline-safe, heavier install.
 
@@ -126,7 +133,7 @@ playback; on speech detection, `audio.pause()` and start capture.
 | Method | Path | Body / Response |
 | :--- | :--- | :--- |
 | `POST` | `/api/voice/transcribe` | multipart `file`, optional `language`, `session_id` → `Transcript` |
-| `POST` | `/api/voice/synthesize` | `{text, voice?, format?}` → `audio/mpeg` bytes |
+| `POST` | `/api/voice/synthesize` | `{text, voice?, format?}` → audio bytes (`audio/wav` for Orpheus), or `{client_side: true, text}` when the browser speaks |
 | `GET` | `/api/voice/voices` | Available voices for the active TTS backend |
 | `GET` | `/api/voice/config` | `{stt_enabled, tts_enabled, tts_backend, max_utterance_s}` — so the UI degrades gracefully instead of throwing |
 
@@ -148,9 +155,13 @@ Limits: 25 MB body cap, allowlist of mime types (`audio/webm`, `audio/ogg`,
   nothing voice-specific beyond `input_mode`, which the brain may use to shorten
   its reply — spoken replies should be one or two sentences, not a wall of
   markdown.
-- Two new events, emitted by the runtime, purely so the UI can show state:
-  `voice_transcribed` (`{text, duration_s, confidence}`) and `voice_spoken`
-  (`{chars, duration_ms}`). They are in the catalog under transport-only events.
+- The runtime emits `voice_transcribed` (`{text, confidence, duration_s,
+  model, language}`) on a voice run's stream, before the brain starts, so it
+  may precede `run_started`. The same details are kept on the user turn's
+  `metadata.voice`. Only known fields are stored.
+- `voice_spoken` is in the catalog but **not emitted**: speech happens in the
+  browser, which the server cannot observe. The UI's indicator (LISTENING →
+  TRANSCRIBING → EXECUTING → SPEAKING → IDLE) covers it for the user.
 
 ### What JARVIS says out loud
 

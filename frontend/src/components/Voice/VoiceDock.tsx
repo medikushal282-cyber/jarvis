@@ -26,11 +26,23 @@ interface VoiceDockProps {
   workspaceId?: string | null;
   /** Blocks new utterances while a run is in flight. */
   disabled?: boolean;
+  /** A run is in flight: shown as EXECUTING between listening and speaking. */
+  executing?: boolean;
   onTranscript: (transcript: Transcript) => void;
 }
 
+type Phase = "LISTENING" | "TRANSCRIBING" | "EXECUTING" | "SPEAKING" | "IDLE";
+
+const PHASE_STYLE: Record<Phase, string> = {
+  LISTENING: "border-red-600 bg-red-500 text-white animate-pulse",
+  TRANSCRIBING: "border-black bg-amber-300 text-black animate-pulse",
+  EXECUTING: "border-black bg-fra-yellow text-black",
+  SPEAKING: "border-black bg-black text-fra-yellow",
+  IDLE: "border-neutral-300 bg-white text-neutral-400",
+};
+
 export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function VoiceDock(
-  { sessionId, workspaceId, disabled = false, onTranscript },
+  { sessionId, workspaceId, disabled = false, executing = false, onTranscript },
   ref,
 ) {
   const [overlayOpen, setOverlayOpen] = useState(false);
@@ -67,6 +79,17 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
   const unavailable = !voice.supported || voice.state === "unsupported" || voice.state === "denied";
   const blocked = disabled || unavailable || voice.state === "transcribing";
 
+  const phase: Phase =
+    voice.state === "listening"
+      ? "LISTENING"
+      : voice.state === "transcribing"
+        ? "TRANSCRIBING"
+        : voice.state === "speaking"
+          ? "SPEAKING"
+          : executing
+            ? "EXECUTING"
+            : "IDLE";
+
   const begin = () => {
     if (blocked) return;
     setOverlayOpen(true);
@@ -75,6 +98,14 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
 
   return (
     <>
+      <span
+        role="status"
+        aria-live="polite"
+        title="Voice status"
+        className={`hidden border px-1.5 py-0.5 font-mono text-[9px] font-extrabold tracking-wide sm:inline ${PHASE_STYLE[phase]}`}
+      >
+        {phase}
+      </span>
       {voice.error && (
         <button
           type="button"

@@ -139,6 +139,7 @@ export const sessions = {
       workspace_id?: string;
       attachments?: Array<{ name: string; content: string; size?: number }>;
       audio_url?: string | null;
+      voice?: { confidence?: number; duration_s?: number; model?: string; language?: string };
     },
   ) =>
     request<{ run_id: string; session_id: string; status: string }>(
@@ -224,7 +225,7 @@ export const voice = {
     const res = await fetch(`${API_BASE}/api/voice/synthesize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice: opts.voice, format: opts.format ?? "mp3" }),
+      body: JSON.stringify({ text, voice: opts.voice, format: opts.format }),
     });
     if (!res.ok) {
       throw new ApiError(`Synthesis failed (${res.status})`, res.status);

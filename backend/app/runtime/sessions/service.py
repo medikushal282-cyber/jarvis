@@ -91,6 +91,7 @@ class RunService:
         execution_mode: str = "normal",
         attachments: Optional[List[Dict[str, Any]]] = None,
         audio_url: Optional[str] = None,
+        voice: Optional[Dict[str, Any]] = None,
     ) -> Run:
         """Steps 1-6. Returns as soon as the run is dispatched."""
         from app.runtime.protocols import EXECUTION_MODES
@@ -115,6 +116,12 @@ class RunService:
             execution_mode=execution_mode,
             status=RUN_PENDING,
         )
+        # Stored so _build_request can hand them to the brain; they were
+        # accepted here but dropped before, so attachments never arrived.
+        run.metadata["attachments"] = list(attachments or [])
+        voice_meta = _voice_meta(voice) if input_mode == "voice" else {}
+        if voice_meta:
+            run.metadata["voice"] = voice_meta
 
         # Step 2: the user's turn is recorded before anything can fail.
         async with self.sessions.lock(session.id):
@@ -126,6 +133,7 @@ class RunService:
                     input_mode=input_mode,
                     run_id=run.id,
                     audio_url=audio_url,
+                    metadata={"voice": voice_meta} if voice_meta else {},
                 ),
                 session.workspace_id,
             )
@@ -139,6 +147,13 @@ class RunService:
             session_id=session.id,
             user_id=session.user_id,
         )
+
+        # How the request arrived, for the timeline. Emitted by the runtime
+        # before the brain starts, so it may precede run_started.
+        if input_mode == "voice":
+            get_emitter(run.id, "runtime")(
+                "voice_transcribed", {"text": objective, **voice_meta}
+            )
 
         task = asyncio.create_task(self._execute(run, session))
         _active_tasks[run.id] = task
@@ -345,6 +360,23 @@ class RunService:
             if events:
                 return events
         return self.runs.read_events(run_id, workspace_id, from_seq)
+
+
+_VOICE_FIELDS = {"confidence": float, "duration_s": float, "model": str, "language": str}
+
+
+def _voice_meta(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep only known transcript fields, with sane types."""
+    out: Dict[str, Any] = {}
+    for key, kind in _VOICE_FIELDS.items():
+        value = (raw or {}).get(key)
+        if value is None:
+            continue
+        try:
+            out[key] = kind(value) if kind is not str else str(value)[:64]
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 run_service = RunService()

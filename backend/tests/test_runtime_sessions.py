@@ -170,7 +170,7 @@ class TestRunLifecycle(StoreTestCase):
 
         return RunService(self.sessions, self.runs, self.workspaces)
 
-    def run_with(self, runner, objective="do a thing", session_id=None):
+    def run_with(self, runner, objective="do a thing", session_id=None, **start_kwargs):
         svc = self.service()
 
         async def scenario():
@@ -180,7 +180,7 @@ class TestRunLifecycle(StoreTestCase):
             service_mod.get_agent_runner = lambda: runner
             try:
                 run = await svc.start_run(
-                    objective, session_id=session_id, workspace_id="ws1"
+                    objective, session_id=session_id, workspace_id="ws1", **start_kwargs
                 )
                 task = service_mod._active_tasks.get(run.id)
                 if task is not None:
@@ -282,6 +282,55 @@ class TestRunLifecycle(StoreTestCase):
             "create a presentation", [t["content"] for t in follow_up]
         )
         self.assertIn("did: create a presentation", [t["content"] for t in follow_up])
+
+    def test_attachments_reach_the_brain(self):
+        """Regression: start_run accepted attachments and then dropped them."""
+        seen = {}
+
+        class Recorder:
+            async def run(self, request: RunRequest, emit) -> RunOutcome:
+                seen["attachments"] = request.attachments
+                emit("run_started", {"objective": request.objective})
+                emit("run_completed", {"status": "completed", "summary": "ok"})
+                return RunOutcome(status="completed", reply="ok")
+
+        files = [{"name": "notes.txt", "content": "hello", "size": 5}]
+        self.run_with(Recorder(), attachments=files)
+        self.assertEqual(seen["attachments"], files)
+
+    def test_voice_run_records_how_the_request_arrived(self):
+        class Quiet:
+            async def run(self, request: RunRequest, emit) -> RunOutcome:
+                emit("run_started", {"objective": request.objective})
+                emit("run_completed", {"status": "completed", "summary": "ok"})
+                return RunOutcome(status="completed", reply="ok")
+
+        svc, run = self.run_with(
+            Quiet(), "open the report", input_mode="voice",
+            voice={"confidence": "0.77", "duration_s": 2.5, "model": "whisper-large-v3-turbo",
+                   "language": "English", "sneaky": "<script>"},
+        )
+        events = svc.read_events(run.id, "ws1")
+        first = events[0]
+        self.assertEqual(first["event"], "voice_transcribed")
+        self.assertEqual(first["data"]["text"], "open the report")
+        self.assertEqual(first["data"]["confidence"], 0.77)
+        self.assertNotIn("sneaky", first["data"])
+
+        turn = self.sessions.get(run.session_id, "ws1").turns[0]
+        self.assertEqual(turn.input_mode, "voice")
+        self.assertEqual(turn.metadata["voice"]["model"], "whisper-large-v3-turbo")
+
+    def test_text_runs_emit_no_voice_event(self):
+        class Quiet:
+            async def run(self, request: RunRequest, emit) -> RunOutcome:
+                emit("run_started", {"objective": request.objective})
+                emit("run_completed", {"status": "completed", "summary": "ok"})
+                return RunOutcome(status="completed", reply="ok")
+
+        svc, run = self.run_with(Quiet(), voice={"confidence": 0.9})
+        names = [e["event"] for e in svc.read_events(run.id, "ws1")]
+        self.assertNotIn("voice_transcribed", names)
 
     def test_everything_survives_a_restart(self):
         """Criterion 4: fresh stores, cleared bus, data still there."""

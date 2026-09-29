@@ -135,7 +135,7 @@ export default function JarvisWorkspace() {
   // --- running ------------------------------------------------------------------
 
   const submit = useCallback(
-    async (text: string, inputMode: "text" | "voice" = "text", audioUrl?: string | null) => {
+    async (text: string, inputMode: "text" | "voice" = "text", transcript?: Transcript) => {
       const objective = text.trim();
       if (!objective || busy) return;
 
@@ -153,7 +153,15 @@ export default function JarvisWorkspace() {
         model,
         provider,
         attachments: files,
-        audioUrl,
+        audioUrl: transcript?.audio_url,
+        voice: transcript
+          ? {
+              confidence: transcript.confidence ?? undefined,
+              duration_s: transcript.duration_s,
+              model: transcript.model,
+              language: transcript.language ?? undefined,
+            }
+          : undefined,
       });
       if (started) {
         runSessionRef.current = started.sessionId;
@@ -172,7 +180,7 @@ export default function JarvisWorkspace() {
         setInput(text);
         return;
       }
-      void submit(text, "voice", transcript.audio_url);
+      void submit(text, "voice", transcript);
     },
     [submit],
   );
@@ -240,6 +248,7 @@ export default function JarvisWorkspace() {
                   sessionId={sessions.sessionId}
                   workspaceId={sessions.workspaceId}
                   disabled={busy}
+                  executing={busy}
                   onTranscript={handleTranscript}
                 />
               }
