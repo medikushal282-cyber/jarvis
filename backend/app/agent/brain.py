@@ -45,12 +45,16 @@ class JarvisBrain(AgentRunner):
         3. record_experience (ALWAYS, even on failure/partial runs)
         """
         # Step 1: Recall relevant experiential memory and preferences
-        memory_ctx: Dict[str, Any] = await self.memory.recall(
-            user_id=request.user_id,
-            objective=request.objective,
-            session_id=request.session_id,
-            workspace_id=request.workspace_id,
-        )
+        try:
+            memory_ctx: Dict[str, Any] = await self.memory.recall(
+                user_id=request.user_id,
+                objective=request.objective,
+                session_id=request.session_id,
+                workspace_id=request.workspace_id,
+            )
+        except Exception as exc:
+            logger.warning("Memory recall failed on run %s (continuing without memory): %s", request.run_id, exc)
+            memory_ctx = {}
 
         # Step 2: Execute autonomous ReAct reasoning & tool loop
         outcome: RunOutcome = await run_agent(

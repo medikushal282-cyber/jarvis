@@ -40,7 +40,13 @@ TEST_SUITES = [
     ("Token Budget", "tests/test_agent_budget.py"),
     ("Single Entry Path", "tests/test_agent_regression.py"),
     ("Tools Doc Freshness", "tests/test_tools_doc.py"),
+    ("Tool Selector", "tests/test_tool_selector.py"),
+    ("Agent Loop", "tests/test_agent_loop.py"),
+    ("LLM Gateway", "tests/test_llm_gateway.py"),
+    ("Agent Permissions", "tests/test_agent_permissions.py"),
+    ("Agent Events", "tests/test_agent_events.py"),
 ]
+
 
 
 def run_pytest(test_path: str) -> Tuple[bool, str]:
@@ -131,6 +137,11 @@ def check_no_env_leakage() -> Tuple[bool, str]:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     print("\n" + "=" * 70)
     print("  JARVIS Agent Verification Suite")
     print("  Branch: agent/core")
@@ -186,15 +197,20 @@ def main() -> int:
         detail_short = (detail[:30] + "...") if len(detail) > 30 else detail
         print(f"{name:<40} {status:<10} {detail_short}")
 
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     print("=" * 70)
     if all_passed:
-        print("\n✅  ALL CHECKS PASSED")
+        print("\n[PASS]  ALL CHECKS PASSED")
         print("\nHandoff sentence:")
         print("  Give me an objective and memory context; I'll decide what to do.")
         print("  Give me the tool registry; I'll decide which tool to call.")
         print("  Give me tool results; I'll decide whether to continue, recover, verify, or finish.")
     else:
-        print("\n❌  SOME CHECKS FAILED — see details above")
+        print("\n[FAIL]  SOME CHECKS FAILED -- see details above")
 
     return 0 if all_passed else 1
 

@@ -567,6 +567,9 @@ async def execute_run_task(
         await emit(run_id, "run_failed", node=current_node_name, data=error_payload)
 
 
+execute_run_task._retired = True  # Explicit retirement marker for legacy graph runner
+
+
 async def resume_approved_run(
     run_id: str,
     decision: str,
