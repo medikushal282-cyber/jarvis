@@ -131,10 +131,13 @@ def build_system_prompt(
         memory_parts.append(f"User preferences: {user_knowledge.strip()[:300]}")
     if hindsight_memories:
         for m in hindsight_memories[:3]:
-            title = m.get("title") or m.get("objective") or "Experience"
-            summary = m.get("outcome", {}).get("summary") or m.get("summary") or ""
-            if summary:
-                memory_parts.append(f"- {title}: {summary[:200]}")
+            if isinstance(m, dict):
+                title = m.get("title") or m.get("objective") or "Experience"
+                summary = m.get("outcome", {}).get("summary") or m.get("summary") or m.get("content") or ""
+                if summary:
+                    memory_parts.append(f"- {title}: {summary[:200]}")
+            elif isinstance(m, str):
+                memory_parts.append(f"- {m[:200]}")
     if memory_parts:
         mem_section = "\n### Recalled Memory:\n" + "\n".join(memory_parts) + "\n"
 

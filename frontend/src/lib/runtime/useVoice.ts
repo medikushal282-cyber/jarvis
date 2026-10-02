@@ -357,10 +357,27 @@ export function useVoice(options: UseVoiceOptions = {}): VoiceHandle {
           return;
         }
 
-        // Browser backend: speak the server-shortened text locally.
+        // Browser backend: speak the server-shortened text locally with a British Butler voice if available.
         if (typeof window !== "undefined" && window.speechSynthesis) {
           const utterance = new SpeechSynthesisUtterance(result.text);
-          utterance.rate = 1.05;
+          utterance.rate = 1.0;
+          
+          const voices = window.speechSynthesis.getVoices();
+          const britishVoice = voices.find(
+            (v) =>
+              v.lang === "en-GB" ||
+              v.lang.startsWith("en-GB") ||
+              v.name.includes("UK") ||
+              v.name.includes("British") ||
+              v.name.includes("George") ||
+              v.name.includes("Daniel") ||
+              v.name.includes("Oliver") ||
+              v.name.includes("Ryan")
+          );
+          if (britishVoice) {
+            utterance.voice = britishVoice;
+          }
+
           utterance.onend = () => {
             speakingRef.current = false;
             setState("idle");

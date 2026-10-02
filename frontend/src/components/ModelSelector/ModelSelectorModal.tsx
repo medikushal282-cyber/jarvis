@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from "@/lib/runtime/client";
+import ProviderManager from "@/components/ProviderManager";
 
 export interface ModelItem {
   id: string;
@@ -35,26 +36,27 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [showProviderManager, setShowProviderManager] = useState<boolean>(false);
+
+  const fetchModels = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE}/api/models`);
+      if (res.ok) {
+        const data = await res.json();
+        setModels(data.models || []);
+      }
+    } catch (e) {
+      console.error("Failed to load models list", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
-
-    const fetchModels = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`${API_BASE}/api/models`);
-        if (res.ok) {
-          const data = await res.json();
-          setModels(data.models || []);
-        }
-      } catch (e) {
-        console.error("Failed to load models list", e);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchModels();
-  }, [isOpen]);
+  }, [isOpen, fetchModels]);
 
   if (!isOpen) return null;
 
@@ -111,27 +113,31 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
             )}
           </div>
 
-          {/* Provider Tabs */}
-          <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
-            {[
-              { id: 'all', label: 'All Providers' },
-              { id: 'groq', label: 'Groq Cloud' },
-              { id: 'ollama', label: 'Ollama (Local OSS)' },
-              { id: 'openai', label: 'OpenAI' },
-              { id: 'anthropic', label: 'Anthropic' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-2.5 py-1 border-2 border-black transition-all shadow-brutal-sm ${
-                  activeTab === tab.id
-                    ? 'bg-black text-white'
-                    : 'bg-fra-cream-card text-black hover:bg-neutral-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          {/* Provider Tabs & Manage Action */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-bold">
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: 'all', label: 'All Providers' },
+                { id: 'gemini', label: 'Google Gemini' },
+                { id: 'groq', label: 'Groq Cloud' },
+                { id: 'ollama', label: 'Ollama (Local)' },
+                { id: 'openai', label: 'OpenAI' },
+                { id: 'anthropic', label: 'Anthropic' },
+                { id: 'openrouter', label: 'OpenRouter' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-2 py-0.5 border-2 border-black transition-all shadow-brutal-xs ${
+                    activeTab === tab.id
+                      ? 'bg-black text-white'
+                      : 'bg-fra-cream-card text-black hover:bg-neutral-100'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -209,18 +215,39 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-white border-t-2 border-black flex items-center justify-between text-xs">
-          <span className="text-[11px] text-neutral-600">
-            Active: <strong className="text-black font-mono">{selectedModel}</strong> ({selectedProvider})
-          </span>
+        <div className="p-3 bg-white border-t-2 border-black flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center space-x-3">
+            <span className="text-[11px] text-neutral-600">
+              Active: <strong className="text-black font-mono">{selectedModel}</strong> ({selectedProvider})
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowProviderManager(true)}
+              className="text-[11px] font-bold text-black hover:underline border border-black px-2 py-0.5 bg-yellow-100 shadow-brutal-xs"
+            >
+              🔑 Manage Keys &amp; Toggle Models
+            </button>
+          </div>
+
           <button
             onClick={onClose}
-            className="border-2 border-black bg-black text-white font-bold px-4 py-1.5 shadow-brutal-sm hover:bg-neutral-800"
+            className="border-2 border-black bg-black text-white font-bold px-4 py-1.5 shadow-brutal-sm hover:bg-neutral-800 cursor-pointer"
           >
             Confirm Selection
           </button>
         </div>
       </div>
+
+      {showProviderManager && (
+        <ProviderManager
+          isOpen={showProviderManager}
+          onClose={() => {
+            setShowProviderManager(false);
+            fetchModels();
+          }}
+          standaloneTrigger={false}
+        />
+      )}
     </div>
   );
 };

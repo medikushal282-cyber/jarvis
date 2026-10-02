@@ -3,6 +3,8 @@
 import React from "react";
 
 import WorkerPoolControl from "@/components/WorkerPoolControl";
+import ToolExplorer from "@/components/ToolExplorer";
+import ProviderManager from "@/components/ProviderManager";
 import type { ConnectionState } from "@/lib/runtime/types";
 
 interface TopBarProps {
@@ -60,6 +62,8 @@ const TopBar: React.FC<TopBarProps> = ({
             <span>{previewOpen ? "Hide Preview" : "Open Preview"}</span>
           </button>
         )}
+        <ProviderManager />
+        <ToolExplorer />
         <WorkerPoolControl />
       </div>
     </header>

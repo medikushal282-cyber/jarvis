@@ -1,11 +1,3 @@
 {
-  "findings": [
-    {
-      "query": "Python CSV to JSON",
-      "finding": "Use csv.DictReader and json.dumps",
-      "source": "Python 3 Docs",
-      "relevance": "Standard pattern",
-      "created_at": 1790706993.4260445
-    }
-  ]
+  "findings": []
 }

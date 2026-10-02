@@ -83,6 +83,8 @@ WORKER_SWITCHING = "worker_switching"
 WORKER_CONNECTED = "worker_connected"
 WORKER_COOLDOWN = "worker_cooldown"
 WORKER_FAILED = "worker_failed"
+HIGH_DEMAND = "high_demand"
+CONTEXT_BUILT = "context_built"
 #: A produced file/preview is ready to show. Payload follows the public
 #: artifact contract (docs/INTERFACES.md section 3.6) -- never a filesystem path.
 ARTIFACT_CREATED = "artifact_created"
@@ -187,6 +189,7 @@ KNOWN_EVENTS: FrozenSet[str] = frozenset(
         VERIFICATION_STARTED, VERIFICATION_COMPLETED,
         PERMISSION_REQUIRED, PERMISSION_GRANTED, PERMISSION_DENIED,
         WORKER_SWITCHING, WORKER_CONNECTED, WORKER_COOLDOWN, WORKER_FAILED,
+        HIGH_DEMAND, CONTEXT_BUILT,
         ARTIFACT_CREATED,
         STREAM_READY, HEARTBEAT, VOICE_TRANSCRIBED, VOICE_SPOKEN,
     }

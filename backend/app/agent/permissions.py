@@ -133,6 +133,9 @@ _TURBO_DEFAULT_SCOPE: frozenset[str] = frozenset(
         "git_diff",
         "git_add",
         "git_commit",
+        "delete_file",
+        "run_command",
+        "terminal_exec",
     }
 )
 

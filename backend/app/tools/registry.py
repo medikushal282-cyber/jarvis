@@ -220,6 +220,21 @@ class ToolRegistry:
                 }
             )
 
+        # 0. Check if tool is enabled by user
+        try:
+            from app.api.tools import get_enabled_tool_names
+            if tool_name not in get_enabled_tool_names():
+                return ToolResult(
+                    success=False,
+                    tool=tool_name,
+                    error={
+                        "code": "TOOL_DISABLED",
+                        "message": f"Tool '{tool_name}' is currently disabled by the user or system configuration."
+                    }
+                )
+        except ImportError:
+            pass # During very early boot or tests without the api package
+
         # 1. Permission enforcement
         ctx = context or ToolContext()
         for required_perm in tool.required_permissions:

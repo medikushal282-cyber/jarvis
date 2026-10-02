@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 .venv/
 venv/
-sandbox_runs/
 *.log
 
 # Frontend
@@ -23,14 +22,31 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Scratch scripts
+# Workspace & Sandbox Storage
+workspace/
+sandbox/
+sandbox_runs/
+artifacts/
+backend/artifacts/
+backend/scratch/
+scratch/
+
+# Keys, Preferences & Local State (DO NOT COMMIT)
+backend/data/provider_keys.json
+backend/data/workers.json
+backend/data/model_preferences.json
+backend/data/tool_preferences.json
+backend/data/knowledge/
+backend/data/hindsight_mock/
+
+# Scratch scripts & temporary test files
 backend/fix*
 backend/rewrite*
 backend/setup*
 backend/test_clean*
-backend/data/hindsight_mock/
-sandbox/
 frontend/page_backup*
 frontend/script*
 factorial.py
 main.py
+crud_test.txt
+csv_to_json.py

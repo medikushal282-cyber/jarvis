@@ -18,6 +18,7 @@ import Conversation from "@/components/Workspace/Conversation";
 import DragHandle from "@/components/Workspace/DragHandle";
 import Sidebar from "@/components/Workspace/Sidebar";
 import TopBar from "@/components/Workspace/TopBar";
+import ContextInspector from "@/components/ContextInspector";
 import { API_BASE } from "@/lib/runtime/client";
 import { isActive, type ArtifactView, type RunView } from "@/lib/runtime/runReducer";
 import type { Transcript } from "@/lib/runtime/types";
@@ -228,6 +229,7 @@ export default function JarvisWorkspace() {
                 onOpenArtifact={openArtifact}
                 onExample={(text) => setInput(text)}
               />
+              {view && <ContextInspector run={view} />}
             </div>
 
             <Composer

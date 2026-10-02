@@ -78,6 +78,11 @@ class CreateWorkspaceRequest(BaseModel):
     description: Optional[str] = ""
 
 
+class UpdateWorkspaceRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 # --- identity ---------------------------------------------------------------
 
 
@@ -119,6 +124,19 @@ def create_workspace(req: CreateWorkspaceRequest, request: Request):
         )
     except ValueError as exc:
         raise _bad_request(exc)
+    return {"success": True, "workspace": meta}
+
+
+@router.patch("/workspaces/{workspace_id}")
+def update_workspace(workspace_id: str, req: UpdateWorkspaceRequest, request: Request):
+    try:
+        meta = workspace_store.update(
+            workspace_id, name=req.name, description=req.description
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
     return {"success": True, "workspace": meta}
 
 

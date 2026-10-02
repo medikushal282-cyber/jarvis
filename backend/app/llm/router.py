@@ -202,68 +202,18 @@ def fetch_live_ollama_models() -> List[Dict[str, Any]]:
             })
     return models
 
-def get_models_catalog() -> List[Dict[str, Any]]:
+def get_models_catalog(only_enabled: bool = True) -> List[Dict[str, Any]]:
     """
-    Dynamically fetches live models from Groq and Ollama,
-    and sorts them so GPT OSS 120B, GPT OSS 20B, and Qwen3 are prominently at the top.
+    Dynamically fetches live models across all configured providers (Gemini, Groq, Ollama, OpenAI, Anthropic, OpenRouter),
+    filtered by user enable/disable preferences.
     """
-    catalog = []
-
-    # 1. Fetch live Groq models
-    groq_models = fetch_live_groq_models()
-    catalog.extend(groq_models)
-
-    # 2. Fetch live Ollama models
-    ollama_models = fetch_live_ollama_models()
-    catalog.extend(ollama_models)
-
-    # 3. Add OpenAI & Anthropic models
-    openai_key = bool(os.environ.get("OPENAI_API_KEY"))
-    catalog.append({
-        "id": "gpt-4o",
-        "name": "GPT-4o",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "context_window": "128k",
-        "badge": "Flagship",
-        "tags": ["TOOL CALLING", "AGENTIC", "VISION"],
-        "description": "Industry benchmark for complex multi-tool autonomous agency.",
-        "available": openai_key,
-        "status_text": "Ready" if openai_key else "Needs OPENAI_API_KEY",
-        "priority": 30
-    })
-    catalog.append({
-        "id": "gpt-4o-mini",
-        "name": "GPT-4o Mini",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "context_window": "128k",
-        "badge": "Fast",
-        "tags": ["TOOL CALLING", "EFFICIENT"],
-        "description": "Cost-effective, low latency tool calling and code generation.",
-        "available": openai_key,
-        "status_text": "Ready" if openai_key else "Needs OPENAI_API_KEY",
-        "priority": 25
-    })
-
-    anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    catalog.append({
-        "id": "claude-3-5-sonnet-20241022",
-        "name": "Claude 3.5 Sonnet",
-        "provider": "anthropic",
-        "provider_name": "Anthropic",
-        "context_window": "200k",
-        "badge": "Benchmark",
-        "tags": ["CODER", "AGENTIC", "REASONING"],
-        "description": "State-of-the-art coding and agentic computer-use reasoning.",
-        "available": anthropic_key,
-        "status_text": "Ready" if anthropic_key else "Needs ANTHROPIC_API_KEY",
-        "priority": 30
-    })
-
-    # Sort descending by priority so gpt-oss-120b, gpt-oss-20b, and qwen3 are at the very top!
-    catalog.sort(key=lambda x: x.get("priority", 0), reverse=True)
-    return catalog
+    try:
+        from app.llm.providers import get_full_models_catalog
+        return get_full_models_catalog(only_enabled=only_enabled)
+    except Exception as e:
+        print(f"Error fetching full models catalog: {e}")
+        # Fallback to local Groq catalog
+        return fetch_live_groq_models()
 
 def extract_thoughts(raw_text: str) -> Tuple[str, Optional[str]]:
     """Extracts <thought>...</thought> or <think>...</think> from model response."""
@@ -283,6 +233,7 @@ def call_litellm(
     run_id: Optional[str] = None,
     turn_idx: Optional[int] = None,
     worker_id: Optional[str] = None,
+    emit: Optional[Any] = None,
 ) -> str:
     import litellm
     import logging
@@ -295,15 +246,52 @@ def call_litellm(
     if prov == "groq":
         if not model_str.startswith("groq/"):
             model_str = f"groq/{model_str}"
+        if not os.environ.get("GROQ_API_KEY"):
+            from app.llm.providers import get_effective_provider_key
+            k = get_effective_provider_key("groq")
+            if k:
+                os.environ["GROQ_API_KEY"] = k
+    elif prov in ("gemini", "google"):
+        clean_m = model_str
+        if clean_m.startswith("models/"):
+            clean_m = clean_m[7:]
+        if clean_m.startswith("gemini/"):
+            clean_m = clean_m[7:]
+        model_str = f"gemini/{clean_m}"
+        
+        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+            from app.llm.providers import get_effective_provider_key
+            k = get_effective_provider_key("gemini")
+            if k:
+                os.environ["GEMINI_API_KEY"] = k
+                os.environ["GOOGLE_API_KEY"] = k
     elif prov == "ollama":
         if not model_str.startswith("ollama/"):
             model_str = f"ollama/{model_str}"
     elif prov == "openai":
         if not model_str.startswith("openai/"):
             model_str = f"openai/{model_str}"
+        if not os.environ.get("OPENAI_API_KEY"):
+            from app.llm.providers import get_effective_provider_key
+            k = get_effective_provider_key("openai")
+            if k:
+                os.environ["OPENAI_API_KEY"] = k
     elif prov == "anthropic":
         if not model_str.startswith("anthropic/"):
             model_str = f"anthropic/{model_str}"
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            from app.llm.providers import get_effective_provider_key
+            k = get_effective_provider_key("anthropic")
+            if k:
+                os.environ["ANTHROPIC_API_KEY"] = k
+    elif prov == "openrouter":
+        clean_m = model_str[11:] if model_str.startswith("openrouter/") else model_str
+        model_str = f"openrouter/{clean_m}"
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            from app.llm.providers import get_effective_provider_key
+            k = get_effective_provider_key("openrouter")
+            if k:
+                os.environ["OPENROUTER_API_KEY"] = k
 
     kwargs: Dict[str, Any] = {
         "model": model_str,
@@ -372,13 +360,36 @@ def call_litellm(
     finally:
         duration_ms = int((time.time() - start_time) * 1000)
         print(f"LLM_REQUEST: worker_id={worker_id}, provider={prov}, model={model_str}, run_id={run_id}, turn={turn_idx}, prompt_tokens={p_tokens}, completion_tokens={c_tokens}, total_tokens={t_tokens}, duration_ms={duration_ms}, success={success}, rate_limit={rate_limit}")
+        
+        if emit:
+            # Emit live LLM context telemetry
+            sys_tok = len(system) // 4
+            user_tok = len(user) // 4
+            tool_tok = len(str(tools)) // 4 if tools else 0
+            
+            emit("context_built", {
+                "prompt_tokens": p_tokens,
+                "completion_tokens": c_tokens,
+                "total_tokens": t_tokens,
+                "system_tokens_est": sys_tok,
+                "user_tokens_est": user_tok,
+                "tool_tokens_est": tool_tok,
+                "model": model_str,
+                "provider": prov,
+                "worker_id": worker_id,
+                "run_id": run_id,
+                "turn": turn_idx,
+                "duration_ms": duration_ms,
+                "success": success,
+                "rate_limit": rate_limit
+            })
 
 
 def call_llm(
     system: str,
     user: str,
-    model: str = "openai/gpt-oss-120b",
-    provider: str = "groq",
+    model: str = None,
+    provider: str = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     emit: Optional[Any] = None,
     run_id: Optional[str] = None,
@@ -388,6 +399,12 @@ def call_llm(
     Unified LLM router using LiteLLM to route to Groq, Ollama, OpenAI, or Anthropic.
     Now acts as the LLM Worker Gateway.
     """
+    import os as _os
+    if model is None:
+        model = _os.environ.get("JARVIS_DEFAULT_MODEL", "openai/gpt-oss-20b")
+    if provider is None:
+        provider = _os.environ.get("JARVIS_DEFAULT_PROVIDER", "groq")
+
     from app.llm.workers import load_workers, mark_worker_error, mark_worker_used
     import time
     import logging
@@ -395,40 +412,85 @@ def call_llm(
 
     workers = load_workers()
 
+    def _classify_error(err_msg: str) -> Tuple[bool, bool, bool, int]:
+        """Classifies error into (is_high_demand, is_rate_limit, is_fatal_exhausted, suggested_cooldown)."""
+        lower = err_msg.lower()
+        is_exhausted = ("tokens per day" in lower or "tpd" in lower or "daily quota" in lower)
+        if is_exhausted:
+            return False, False, True, 0
+        
+        is_high_demand = any(k in lower for k in [
+            "503", "502", "504",
+            "high demand", "experiencing high demand",
+            "spikes in demand", "service unavailable",
+            "temporarily unavailable", "overloaded",
+            "model is overloaded", "capacity", "server error"
+        ])
+        
+        is_rate_limit = any(k in lower for k in [
+            "429", "rate_limit", "rate limit", "too many requests", "resource_exhausted"
+        ])
+        
+        cooldown = 15
+        import re
+        try:
+            match = re.search(r'try again in (\d+\.?\d*)s', lower)
+            if match:
+                cooldown = max(cooldown, int(float(match.group(1))) + 3)
+        except Exception:
+            pass
+            
+        return is_high_demand, is_rate_limit, False, cooldown
+
     if not workers:
         # Fallback to standard environment keys if NO workers configured at all
-        try:
-            raw_response = call_litellm(system, user, model, provider, tools=tools, run_id=run_id, turn_idx=turn_idx)
-            return extract_thoughts(raw_response)
-        except Exception as e:
-            err_str = str(e).lower()
-            if any(k in err_str for k in ["rate_limit", "429", "too many requests"]):
-                import re
-                cooldown_s = 30
-                try:
-                    match = re.search(r'try again in (\d+\.?\d*)s', err_str)
-                    if match:
-                        cooldown_s = int(float(match.group(1))) + 2
-                except Exception:
-                    pass
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                raw_response = call_litellm(system, user, model, provider, tools=tools, run_id=run_id, turn_idx=turn_idx, emit=emit)
+                if attempt > 0 and emit:
+                    emit("worker_connected", {"message": "Model reconnected and responded successfully."}, node="agent")
+                return extract_thoughts(raw_response)
+            except Exception as e:
+                err_str = str(e)
+                is_high_demand, is_rate_limit, is_fatal, suggested_cooldown = _classify_error(err_str)
+                
+                if (is_high_demand or is_rate_limit) and not is_fatal and attempt < max_retries - 1:
+                    # Progressive backoff for high demand spikes: 4s -> 8s -> 15s -> 25s -> 35s
+                    backoffs = [4, 8, 15, 25, 35]
+                    cooldown_s = backoffs[min(attempt, len(backoffs) - 1)]
+                    if is_rate_limit and suggested_cooldown > cooldown_s:
+                        cooldown_s = suggested_cooldown
                     
-                if 0 < cooldown_s <= 60:
+                    notice = (
+                        f"Model '{model}' is currently in high demand (surging traffic). "
+                        f"Responses may take slightly longer — automatically retrying in {cooldown_s}s (Attempt {attempt+1}/{max_retries})..."
+                    ) if is_high_demand else (
+                        f"Rate limit reached on '{model}'. Waiting {cooldown_s}s before retrying (Attempt {attempt+1}/{max_retries})..."
+                    )
+                    
                     if emit:
-                        emit("worker_switching", {"message": f"Rate limited. Waiting {cooldown_s}s for retry-after to expire before trying again..."}, node="agent")
-                    logger.info(f"Fallback rate limited. Waiting {cooldown_s}s.")
+                        emit("high_demand", {
+                            "message": notice,
+                            "attempt": attempt + 1,
+                            "max_attempts": max_retries,
+                            "cooldown_s": cooldown_s,
+                            "model": model,
+                            "provider": provider,
+                            "is_high_demand": is_high_demand
+                        }, node="agent")
+                        emit("worker_switching", {"message": notice}, node="agent")
+                    
                     import time
                     time.sleep(cooldown_s)
-                    try:
-                        raw_response = call_litellm(system, user, model, provider, tools=tools, run_id=run_id, turn_idx=turn_idx)
-                        if emit:
-                            emit("worker_connected", {"message": "Resumed successfully after rate limit cooldown."}, node="agent")
-                        return extract_thoughts(raw_response)
-                    except Exception as retry_e:
-                        raise Exception(f"LLM provider error (after rate-limit retry): {retry_e}")
+                    continue
                 
-            raise Exception(f"LLM provider error: {e}")
+                raise Exception(f"LLM provider error: {e}")
 
-    MAX_RETRIES = len(workers) * 2 
+    # Filter out malformed worker entries (missing required fields) before any processing
+    workers = [w for w in workers if w.get("worker_id") and w.get("model") and w.get("provider")]
+
+    MAX_RETRIES = max(len(workers) * 2, 1)
     attempts = 0
     failures = []
 
@@ -483,7 +545,7 @@ def call_llm(
             if api_key:
                 os.environ[env_key] = api_key
 
-            raw_response = call_litellm(system, user, w_model, w_prov, tools=tools, run_id=run_id, turn_idx=turn_idx, worker_id=wid)
+            raw_response = call_litellm(system, user, w_model, w_prov, tools=tools, run_id=run_id, turn_idx=turn_idx, worker_id=wid, emit=emit)
 
             if api_key:
                 if old_key is not None:
@@ -504,8 +566,8 @@ def call_llm(
                 elif env_key in os.environ:
                     del os.environ[env_key]
 
-            err_str = str(e).lower()
-            is_rate_limit = any(k in err_str for k in ["rate_limit", "429", "too many requests"])
+            err_str = str(e)
+            is_high_demand, is_rate_limit, is_fatal, suggested_cooldown = _classify_error(err_str)
             
             failures.append({
                 "worker_id": wid,
@@ -513,25 +575,21 @@ def call_llm(
                 "model": w_model,
                 "error_type": type(e).__name__,
                 "message": str(e),
-                "rate_limit": is_rate_limit
+                "rate_limit": is_rate_limit or is_high_demand
             })
 
-            if is_rate_limit:
-                import re
-                cooldown_s = 30
-                try:
-                    match = re.search(r'try again in (\d+\.?\d*)s', err_str)
-                    if match:
-                        cooldown_s = int(float(match.group(1))) + 2
-                except Exception:
-                    pass
+            if is_high_demand or is_rate_limit:
+                cooldown_s = suggested_cooldown if suggested_cooldown > 0 else 20
                 mark_worker_error(wid, str(e), cooldown_s)
-                
                 workers = load_workers()
                 if emit:
-                    emit("worker_cooldown", {"worker_id": wid, "reason": "rate_limit", "cooldown_s": cooldown_s}, node="agent")
+                    emit("worker_cooldown", {
+                        "worker_id": wid,
+                        "reason": "high_demand" if is_high_demand else "rate_limit",
+                        "cooldown_s": cooldown_s
+                    }, node="agent")
             else:
-                # For non-rate-limit errors, we also mark it as failed with a generic cooldown so we try the next worker
+                # For non-rate-limit errors, mark with a cooldown so other workers are tried
                 mark_worker_error(wid, str(e), 60)
                 workers = load_workers()
                 if emit:

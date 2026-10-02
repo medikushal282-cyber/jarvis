@@ -83,6 +83,18 @@ export interface RunError {
   node?: string;
 }
 
+export interface TokenTelemetry {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  system_tokens_est: number;
+  user_tokens_est: number;
+  tool_tokens_est: number;
+  model: string;
+  provider: string;
+  worker_id: string;
+}
+
 export interface RunView {
   runId: string | null;
   phase: RunPhase;
@@ -103,6 +115,8 @@ export interface RunView {
   verification: { valid: boolean; reason: string } | null;
   reply: string;
   error: RunError | null;
+  telemetry: TokenTelemetry | null;
+  memoryTokensEst: number;
 }
 
 export const initialRunView: RunView = {
@@ -122,6 +136,8 @@ export const initialRunView: RunView = {
   verification: null,
   reply: "",
   error: null,
+  telemetry: null,
+  memoryTokensEst: 0,
 };
 
 // --- actions ----------------------------------------------------------------
@@ -604,7 +620,40 @@ function applyEvent(state: RunView, envelope: RuntimeEvent): RunView {
       return { ...s, artifacts: mergeArtifacts(s.artifacts, [artifact]) };
     }
 
-    // --- memory -----------------------------------------------------------------------
+    // --- memory & telemetry -----------------------------------------------------------
+    case "context_built": {
+      return {
+        ...s,
+        telemetry: {
+          prompt_tokens: Number(d.prompt_tokens ?? 0),
+          completion_tokens: Number(d.completion_tokens ?? 0),
+          total_tokens: Number(d.total_tokens ?? 0),
+          system_tokens_est: Number(d.system_tokens_est ?? 0),
+          user_tokens_est: Number(d.user_tokens_est ?? 0),
+          tool_tokens_est: Number(d.tool_tokens_est ?? 0),
+          model: String(d.model ?? "unknown"),
+          provider: String(d.provider ?? "unknown"),
+          worker_id: String(d.worker_id ?? "unknown"),
+        }
+      };
+    }
+
+    case "memory_used": {
+      const hits = Number(d.count ?? 0);
+      const toks = Number(d.tokens_est ?? 0);
+      const newState = { ...s, memoryTokensEst: toks };
+      if (!hits) return newState;
+      return {
+        ...newState,
+        steps: addStep(s.steps, {
+          id: `memory_${seq}`,
+          kind: "memory",
+          label: `Recalled ${hits} past ${hits === 1 ? "experience" : "experiences"}`,
+          status: "done",
+        }),
+      };
+    }
+
     case "memory_recalled": {
       const hits = Array.isArray(d.hits) ? d.hits.length : Number(d.count ?? 0);
       if (!hits) return s;
@@ -741,6 +790,31 @@ function applyEvent(state: RunView, envelope: RuntimeEvent): RunView {
           reason: String(d.reason ?? (event === "worker_cooldown" ? "rate_limit" : "failed")),
         },
       };
+
+    case "high_demand": {
+      const msg = String(d.message ?? "Model is in high demand; retrying automatically...");
+      return {
+        ...s,
+        steps: addStep(s.steps, {
+          id: `high_demand_${seq}`,
+          kind: "worker",
+          label: "⚡ Model in high demand — retrying automatically",
+          status: "running",
+          detail: msg,
+        }),
+      };
+    }
+
+    case "worker_connected": {
+      return {
+        ...s,
+        steps: s.steps.map((st) =>
+          st.kind === "worker" && st.status === "running"
+            ? { ...st, status: "done" as const, label: "✓ Model connected — resuming" }
+            : st
+        ),
+      };
+    }
 
     case "worker_switching": {
       const to = workerName(d);

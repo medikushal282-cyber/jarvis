@@ -68,6 +68,7 @@ _EVENTS = {
     "recovery": "recovery",
     "worker_switching": "worker_switching",
     "memory_used": "memory_used",
+    "context_built": "context_built",
     "completed": "run_completed",
     "failed": "run_failed",
 }
@@ -272,23 +273,25 @@ async def run_agent(
             workspace_id=request.workspace_id or "",
             objective=request.objective,
             memory_context=memory_context or {},
-            turbo_mode=getattr(request, "turbo_mode", False),
+            turbo_mode=(getattr(request, "execution_mode", "normal") == "turbo"),
             pre_authorized_scope=getattr(request, "pre_authorized_scope", []),
         )
 
-    model = request.model or "openai/gpt-oss-120b"
-    provider = request.provider or "groq"
+    model = request.model or os.environ.get("JARVIS_DEFAULT_MODEL", "llama-3.3-70b-versatile")
+    provider = request.provider or os.environ.get("JARVIS_DEFAULT_PROVIDER", "groq")
     ws_root = request.workspace_root or "."
 
     # --- Memory event ---
     mem = state.memory_context
-    experiences = mem.get("experiences", [])
-    user_knowledge = mem.get("user_knowledge", "")
+    experiences = mem.get("relevant_experiences", [])
+    user_knowledge = mem.get("user_preferences", "")
+    tokens_est = mem.get("_tokens_est", 0)
+    
     if experiences or user_knowledge:
         emit(_EVENTS["memory_used"], {
             "count": len(experiences),
-            "hits": [e.get("title", "") for e in experiences[:3]],
             "user_knowledge": bool(user_knowledge),
+            "tokens_est": tokens_est
         }, node="agent")
 
     # --- Workspace info ---
@@ -692,13 +695,13 @@ def _emit_tool_events(
     if tool_name in ("create_file", "write_file") and res.success:
         emit("file_created", {
             "path": data.get("path") or args.get("path", ""),
-            "bytes": data.get("bytes", 0),
+            "bytes": data.get("bytes_written", data.get("bytes", 0)),
             "lines": data.get("lines", 0),
         }, node="agent")
     elif tool_name in ("update_file", "patch_file") and res.success:
         emit("file_updated", {
             "path": data.get("path") or args.get("path", ""),
-            "bytes": data.get("bytes", 0),
+            "bytes": data.get("bytes_written", data.get("bytes", 0)),
         }, node="agent")
     elif tool_name == "delete_file" and res.success:
         emit("file_deleted", {"path": data.get("path") or args.get("path", "")}, node="agent")

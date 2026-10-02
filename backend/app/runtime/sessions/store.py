@@ -1,18 +1,26 @@
-"""File-backed persistence for workspaces, sessions and runs.
+"""File-backed persistence for workspaces, chats, sessions and runs.
 
-All reads and writes to ``sandbox/`` go through here. Writes are atomic
+All reads and writes to ``workspace/`` go through here. Writes are atomic
 (tmp + ``os.replace``) so a crash mid-write cannot corrupt a session, and
 every path derived from request input goes through ``resolve_within``.
 
-Layout::
+Hierarchy on Disk:
 
-    sandbox/<workspace_id>/
-        workspace.json
-        sessions/<session_id>.json
-        runs/<run_id>/run.json
-                     /events.ndjson
-                     /result.json
-                     /artifacts/
+    Fraiday/
+    └── workspace/
+        └── {workspace_id}/                (e.g., default/)
+            ├── workspace.json              (workspace metadata)
+            ├── storage/                   (Global workspace storage)
+            └── chats/                     (Chats directory)
+                └── {chat_id}/             (e.g., ses_6f4e251115e1/)
+                    ├── session.json       (chat turns & context)
+                    ├── runs/              (run events, result.json, artifacts)
+                    │   └── {run_id}/
+                    │       ├── run.json
+                    │       ├── events.ndjson
+                    │       ├── result.json
+                    │       └── artifacts/
+                    └── storage/           (Chat sub-storage: files created/accessed during this chat)
 """
 
 from __future__ import annotations
@@ -60,15 +68,23 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
 
 
 class WorkspaceStore:
-    """Workspaces are just directories; this keeps their ids safe."""
+    """Workspaces are directories inside the workspace/ root."""
 
     def root(self) -> Path:
         return config.sandbox_root()
 
     def dir_for(self, workspace_id: str) -> Path:
-        # Validate, never coerce: safe_slug("../victim") would silently
-        # resolve onto a real workspace named "victim".
         return resolve_within(self.root(), require_safe_segment(workspace_id, kind="workspace_id"))
+
+    def storage_dir(self, workspace_id: str) -> Path:
+        d = self.dir_for(workspace_id) / "storage"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def chats_dir(self, workspace_id: str) -> Path:
+        d = self.dir_for(workspace_id) / "chats"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def exists(self, workspace_id: str) -> bool:
         try:
@@ -85,7 +101,8 @@ class WorkspaceStore:
             base = f"{base}_{uuid.uuid4().hex[:6]}"
             ws_dir = resolve_within(self.root(), base)
 
-        (ws_dir / "sessions").mkdir(parents=True, exist_ok=True)
+        (ws_dir / "storage").mkdir(parents=True, exist_ok=True)
+        (ws_dir / "chats").mkdir(parents=True, exist_ok=True)
         (ws_dir / "runs").mkdir(parents=True, exist_ok=True)
 
         meta = {
@@ -105,9 +122,12 @@ class WorkspaceStore:
         meta_path = ws_dir / "workspace.json"
         existing = _read_json(meta_path)
         if existing:
+            (ws_dir / "storage").mkdir(parents=True, exist_ok=True)
+            (ws_dir / "chats").mkdir(parents=True, exist_ok=True)
             return existing
 
-        (ws_dir / "sessions").mkdir(parents=True, exist_ok=True)
+        (ws_dir / "storage").mkdir(parents=True, exist_ok=True)
+        (ws_dir / "chats").mkdir(parents=True, exist_ok=True)
         (ws_dir / "runs").mkdir(parents=True, exist_ok=True)
         meta = {
             "id": ws_id,
@@ -117,6 +137,30 @@ class WorkspaceStore:
             "created_at": utc_now(),
             "root_path": str(ws_dir),
         }
+        _write_atomic(meta_path, meta)
+        return meta
+
+    def update(self, workspace_id: str, name: Optional[str] = None, description: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        try:
+            ws_dir = self.dir_for(workspace_id)
+        except ValueError:
+            return None
+        meta_path = ws_dir / "workspace.json"
+        meta = _read_json(meta_path)
+        if not meta:
+            meta = {
+                "id": workspace_id,
+                "name": workspace_id,
+                "description": "",
+                "user_id": LOCAL_USER_ID,
+                "created_at": utc_now(),
+                "root_path": str(ws_dir),
+            }
+        if name is not None and name.strip():
+            meta["name"] = name.strip()
+        if description is not None:
+            meta["description"] = description.strip()
+        meta["updated_at"] = utc_now()
         _write_atomic(meta_path, meta)
         return meta
 
@@ -137,17 +181,22 @@ class WorkspaceStore:
             owner = meta.get("user_id", LOCAL_USER_ID)
             if user_id and owner not in (user_id, LOCAL_USER_ID):
                 continue
-            # A migrated conversation exists in both folders; count it once.
+            
+            # Count chat sessions
             stems = set()
+            chats_dir = entry / "chats"
+            if chats_dir.is_dir():
+                for c in chats_dir.iterdir():
+                    if c.is_dir() and (c / "session.json").exists():
+                        stems.add(c.name)
+                    elif c.suffix == ".json":
+                        stems.add(c.stem)
             for d in (entry / "sessions", entry / "conversations"):
                 if d.is_dir():
                     stems.update(f.stem for f in d.iterdir() if f.suffix == ".json")
             count = len(stems)
             out.append(
                 {
-                    # The directory name is the id. workspace.json can be
-                    # stale (sandbox/kushal holds "kushal\\" from the old
-                    # unsanitised API), and ids are validated on every lookup.
                     "id": entry.name,
                     "name": meta.get("name", entry.name),
                     "description": meta.get("description", ""),
@@ -164,13 +213,13 @@ class WorkspaceStore:
         if not ws_dir.is_dir():
             return False
         if ws_dir.resolve() == self.root().resolve():
-            raise ValueError("refusing to delete the sandbox root")
+            raise ValueError("refusing to delete the workspace root")
         shutil.rmtree(ws_dir)
         return True
 
 
 class SessionStore:
-    """Sessions, with a write-through cache and a lock per session id."""
+    """Chat sessions, with a write-through cache and a lock per session id."""
 
     def __init__(self, workspaces: Optional[WorkspaceStore] = None):
         self.workspaces = workspaces or WorkspaceStore()
@@ -190,15 +239,38 @@ class SessionStore:
 
     # --- paths --------------------------------------------------------------
 
-    def _dir(self, workspace_id: str) -> Path:
+    def chat_dir(self, workspace_id: str, session_id: str) -> Path:
         ws_dir = self.workspaces.dir_for(workspace_id)
-        sessions = ws_dir / "sessions"
-        sessions.mkdir(parents=True, exist_ok=True)
-        return sessions
+        slug = require_safe_segment(session_id, kind="session_id")
+        d = resolve_within(ws_dir, "chats", slug)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def chat_storage_dir(self, workspace_id: str, session_id: str) -> Path:
+        d = self.chat_dir(workspace_id, session_id) / "storage"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def _path(self, workspace_id: str, session_id: str) -> Path:
-        session_id = require_safe_segment(session_id, kind="session_id")
-        return resolve_within(self._dir(workspace_id), f"{session_id}.json")
+        slug = require_safe_segment(session_id, kind="session_id")
+        ws_dir = self.workspaces.dir_for(workspace_id)
+        
+        # Check existing chat folder layout first
+        chat_json = ws_dir / "chats" / slug / "session.json"
+        if chat_json.exists():
+            return chat_json
+        
+        # Check legacy paths
+        for legacy in (
+            ws_dir / "chats" / f"{slug}.json",
+            ws_dir / "sessions" / f"{slug}.json",
+            ws_dir / "conversations" / f"{slug}.json",
+        ):
+            if legacy.exists():
+                return legacy
+
+        # Default canonical location for new or updated session
+        return chat_json
 
     def _find_path(self, session_id: str) -> Optional[Path]:
         """Locate a session without knowing its workspace."""
@@ -206,8 +278,13 @@ class SessionStore:
         for ws in self.workspaces.root().iterdir():
             if not ws.is_dir():
                 continue
-            for sub in ("sessions", "conversations"):
-                candidate = ws / sub / f"{slug}.json"
+            candidates = [
+                ws / "chats" / slug / "session.json",
+                ws / "chats" / f"{slug}.json",
+                ws / "sessions" / f"{slug}.json",
+                ws / "conversations" / f"{slug}.json",
+            ]
+            for candidate in candidates:
                 if candidate.exists():
                     return candidate
         return None
@@ -224,12 +301,19 @@ class SessionStore:
         from app.runtime.ids import new_session_id
 
         self.workspaces.ensure(workspace_id, user_id)
+        sid = session_id or new_session_id()
         session = Session(
-            id=session_id or new_session_id(),
+            id=sid,
             user_id=user_id,
             workspace_id=require_safe_segment(workspace_id, kind="workspace_id"),
             title=title,
         )
+        
+        # Ensure directory structure: workspace/{ws}/chats/{sid}/storage & runs
+        c_dir = self.chat_dir(workspace_id, sid)
+        (c_dir / "storage").mkdir(parents=True, exist_ok=True)
+        (c_dir / "runs").mkdir(parents=True, exist_ok=True)
+        
         self.save(session)
         return session
 
@@ -257,8 +341,12 @@ class SessionStore:
             return None
 
         raw.setdefault("id", session_id)
-        # A legacy conversation file knows neither its workspace nor its owner.
-        raw.setdefault("workspace_id", path.parent.parent.name)
+        # Resolve workspace_id from path
+        if path.name == "session.json":
+            raw.setdefault("workspace_id", path.parent.parent.parent.name)
+        else:
+            raw.setdefault("workspace_id", path.parent.parent.name)
+            
         session = Session.from_dict(raw)
         self._cache[session.id] = session
         return session
@@ -266,6 +354,9 @@ class SessionStore:
     def save(self, session: Session) -> Session:
         session.updated_at = utc_now()
         path = self._path(session.workspace_id, session.id)
+        # Ensure chat sub-storage directory exists
+        c_dir = self.chat_dir(session.workspace_id, session.id)
+        (c_dir / "storage").mkdir(parents=True, exist_ok=True)
         _write_atomic(path, session.to_dict())
         self._cache[session.id] = session
         return session
@@ -284,6 +375,31 @@ class SessionStore:
             [d for d in root.iterdir() if d.is_dir()]
         )
         for ws_dir in workspaces:
+            # 1. Read chats/ directory
+            chats_dir = ws_dir / "chats"
+            if chats_dir.is_dir():
+                for item in chats_dir.iterdir():
+                    session_file = None
+                    if item.is_dir() and (item / "session.json").exists():
+                        session_file = item / "session.json"
+                        sid = item.name
+                    elif item.is_file() and item.suffix == ".json":
+                        session_file = item
+                        sid = item.stem
+                    
+                    if session_file and session_file.exists():
+                        raw = _read_json(session_file)
+                        if raw is not None:
+                            raw.setdefault("id", sid)
+                            raw.setdefault("workspace_id", ws_dir.name)
+                            session = Session.from_dict(raw)
+                            if session.id not in seen:
+                                seen.add(session.id)
+                                if not user_id or session.user_id in (user_id, LOCAL_USER_ID):
+                                    if not status or session.status == status:
+                                        out.append(session)
+
+            # 2. Read legacy sessions/ and conversations/
             for sub in ("sessions", "conversations"):
                 d = ws_dir / sub
                 if not d.is_dir():
@@ -291,16 +407,14 @@ class SessionStore:
                 for f in d.iterdir():
                     if f.suffix != ".json":
                         continue
+                    if f.stem in seen:
+                        continue
                     raw = _read_json(f)
                     if raw is None:
                         continue
                     raw.setdefault("id", f.stem)
                     raw.setdefault("workspace_id", ws_dir.name)
                     session = Session.from_dict(raw)
-                    # sessions/ is read first, so a migrated legacy copy in
-                    # conversations/ is skipped rather than listed twice.
-                    if session.id in seen:
-                        continue
                     seen.add(session.id)
                     if user_id and session.user_id not in (user_id, LOCAL_USER_ID):
                         continue
@@ -327,15 +441,23 @@ class SessionStore:
         if session is None:
             return False
         if hard:
-            path = self._path(session.workspace_id, session.id)
-            legacy = (
-                self.workspaces.dir_for(session.workspace_id)
-                / "conversations"
-                / f"{require_safe_segment(session.id, kind='session_id')}.json"
-            )
-            for p in (path, legacy):
+            slug = require_safe_segment(session.id, kind="session_id")
+            ws_dir = self.workspaces.dir_for(session.workspace_id)
+            
+            # Remove chat directory
+            chat_dir = ws_dir / "chats" / slug
+            if chat_dir.is_dir():
+                shutil.rmtree(chat_dir, ignore_errors=True)
+                
+            # Remove any legacy flat files
+            for p in (
+                ws_dir / "chats" / f"{slug}.json",
+                ws_dir / "sessions" / f"{slug}.json",
+                ws_dir / "conversations" / f"{slug}.json",
+            ):
                 if p.exists():
-                    p.unlink()
+                    p.unlink(missing_ok=True)
+                    
             self._cache.pop(session_id, None)
             return True
         session.status = "archived"
@@ -353,30 +475,56 @@ class RunStore:
         self.workspaces = workspaces or WorkspaceStore()
         self._cache: Dict[str, Run] = {}
 
-    def dir_for(self, workspace_id: str, run_id: str) -> Path:
+    def dir_for(self, workspace_id: str, run_id: str, session_id: Optional[str] = None) -> Path:
         ws_dir = self.workspaces.dir_for(workspace_id)
-        run_dir = resolve_within(ws_dir, "runs", require_safe_segment(run_id, kind="run_id"))
+        slug = require_safe_segment(run_id, kind="run_id")
+        
+        # If session_id is provided, store under chats/{session_id}/runs/{run_id}
+        if session_id:
+            s_slug = require_safe_segment(session_id, kind="session_id")
+            run_dir = resolve_within(ws_dir, "chats", s_slug, "runs", slug)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            return run_dir
+            
+        # Check if run already exists in any chat
+        existing = self._find_dir(run_id)
+        if existing:
+            return existing
+            
+        # Fallback to workspace/runs/{run_id}
+        run_dir = resolve_within(ws_dir, "runs", slug)
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
 
     def _find_dir(self, run_id: str) -> Optional[Path]:
         slug = require_safe_segment(run_id, kind="run_id")
         for ws in self.workspaces.root().iterdir():
+            if not ws.is_dir():
+                continue
+            # Check chats/*/runs/{slug}
+            chats_dir = ws / "chats"
+            if chats_dir.is_dir():
+                for c in chats_dir.iterdir():
+                    if c.is_dir():
+                        candidate = c / "runs" / slug
+                        if candidate.is_dir():
+                            return candidate
+            # Check workspace/runs/{slug}
             candidate = ws / "runs" / slug
             if candidate.is_dir():
                 return candidate
         return None
 
-    def events_path(self, workspace_id: str, run_id: str) -> Path:
-        return self.dir_for(workspace_id, run_id) / "events.ndjson"
+    def events_path(self, workspace_id: str, run_id: str, session_id: Optional[str] = None) -> Path:
+        return self.dir_for(workspace_id, run_id, session_id=session_id) / "events.ndjson"
 
-    def artifacts_dir(self, workspace_id: str, run_id: str) -> Path:
-        d = self.dir_for(workspace_id, run_id) / "artifacts"
+    def artifacts_dir(self, workspace_id: str, run_id: str, session_id: Optional[str] = None) -> Path:
+        d = self.dir_for(workspace_id, run_id, session_id=session_id) / "artifacts"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def save(self, run: Run) -> Run:
-        _write_atomic(self.dir_for(run.workspace_id, run.id) / "run.json", run.to_dict())
+        _write_atomic(self.dir_for(run.workspace_id, run.id, session_id=run.session_id) / "run.json", run.to_dict())
         self._cache[run.id] = run
         return run
 
@@ -397,7 +545,7 @@ class RunStore:
         return run
 
     def save_result(self, run: Run, result: Dict[str, Any]) -> None:
-        _write_atomic(self.dir_for(run.workspace_id, run.id) / "result.json", result)
+        _write_atomic(self.dir_for(run.workspace_id, run.id, session_id=run.session_id) / "result.json", result)
 
     def get_result(self, run_id: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         run_dir = (
@@ -441,13 +589,20 @@ class RunStore:
             [d for d in root.iterdir() if d.is_dir()]
         )
         for ws_dir in workspaces:
+            # 1. Check chats/{session_id}/runs
+            chat_runs = ws_dir / "chats" / session_id / "runs"
+            if chat_runs.is_dir():
+                for run_dir in chat_runs.iterdir():
+                    raw = _read_json(run_dir / "run.json")
+                    if raw and raw.get("session_id") == session_id:
+                        out.append(Run.from_dict(raw))
+            # 2. Check legacy workspace/runs
             runs_dir = ws_dir / "runs"
-            if not runs_dir.is_dir():
-                continue
-            for run_dir in runs_dir.iterdir():
-                raw = _read_json(run_dir / "run.json")
-                if raw and raw.get("session_id") == session_id:
-                    out.append(Run.from_dict(raw))
+            if runs_dir.is_dir():
+                for run_dir in runs_dir.iterdir():
+                    raw = _read_json(run_dir / "run.json")
+                    if raw and raw.get("session_id") == session_id:
+                        out.append(Run.from_dict(raw))
         out.sort(key=lambda r: r.created_at)
         return [r.summary() for r in out]
 

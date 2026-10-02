@@ -120,12 +120,59 @@ class GroqTTS:
         return [{"id": self.default_voice, "name": self.default_voice, "model": self.model}]
 
 
+class EdgeTTS:
+    """Microsoft Edge Neural TTS: free, ultra-high quality, zero latency British Butler voices."""
+
+    name = "edge"
+    client_side = False
+
+    def __init__(self, voice: Optional[str] = None):
+        self.default_voice = voice or getattr(config, "TTS_VOICE", "en-GB-RyanNeural")
+
+    async def synthesize(
+        self, text: str, *, voice: Optional[str] = None, fmt: Optional[str] = None
+    ) -> Speech:
+        v = voice or self.default_voice
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(text, v)
+            chunks = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    chunks.append(chunk["data"])
+            audio = b"".join(chunks)
+            if not audio:
+                raise SynthesisError("Edge TTS returned empty audio stream")
+            return Speech(
+                audio=audio,
+                mime="audio/mpeg",
+                voice=v,
+                model="edge-neural",
+            )
+        except Exception as exc:
+            logger.warning("Edge TTS synthesis error: %s", exc)
+            raise SynthesisError(f"Edge TTS failed: {exc}") from exc
+
+    def voices(self) -> List[Dict[str, Any]]:
+        return [
+            {"id": "en-GB-RyanNeural", "name": "Ryan (British Butler / Formal)", "gender": "Male", "locale": "en-GB"},
+            {"id": "en-GB-ThomasNeural", "name": "Thomas (British Gentleman)", "gender": "Male", "locale": "en-GB"},
+            {"id": "en-GB-ArthurNeural", "name": "Arthur (British Distinguished)", "gender": "Male", "locale": "en-GB"},
+            {"id": "en-GB-SoniaNeural", "name": "Sonia (British Female)", "gender": "Female", "locale": "en-GB"},
+        ]
+
+
 def get_tts() -> TextToSpeech:
     if not config.TTS_ENABLED:
         return BrowserTTS()
-    if config.TTS_BACKEND == "groq":
+    backend = getattr(config, "TTS_BACKEND", "edge").lower()
+    if backend == "edge":
+        return EdgeTTS()
+    if backend == "groq":
         return GroqTTS()
-    return BrowserTTS()
+    if backend == "browser":
+        return BrowserTTS()
+    return EdgeTTS()
 
 
 __all__ = [
@@ -133,6 +180,7 @@ __all__ = [
     "TextToSpeech",
     "BrowserTTS",
     "GroqTTS",
+    "EdgeTTS",
     "SynthesisError",
     "SynthesisUnsupported",
     "get_tts",

@@ -30,6 +30,7 @@ export const JarvisVoiceOverlay: React.FC<JarvisVoiceOverlayProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md animate-in fade-in duration-200 select-none"
       onMouseUp={onRelease}
       onTouchEnd={onRelease}
+      onClick={onClose}
     >
       {/* Sci-Fi Grid Background */}
       <div
@@ -47,7 +48,10 @@ export const JarvisVoiceOverlay: React.FC<JarvisVoiceOverlayProps> = ({
       <div className="absolute inset-0 bg-radial-gradient from-transparent via-black/50 to-black pointer-events-none" />
 
       {/* Central HUD Dial Container */}
-      <div className="relative flex flex-col items-center justify-center">
+      <div 
+        className="relative flex flex-col items-center justify-center"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Outer Dot Ring / Ticks */}
         <div className="relative w-80 h-80 sm:w-96 sm:h-96 flex items-center justify-center">
           {/* Outer Orbital Tick Dots */}

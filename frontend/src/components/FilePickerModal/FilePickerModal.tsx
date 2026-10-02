@@ -92,6 +92,32 @@ export const FilePickerModal: React.FC<FilePickerModalProps> = ({ isOpen, onClos
     });
   };
 
+  const handleDeleteFile = async (filePath: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${filePath}" from workspace?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/workspace/file?path=${encodeURIComponent(filePath)}`, {
+        method: 'DELETE',
+        headers: {
+          'X-Workspace-Id': workspaceId || 'default'
+        }
+      });
+      if (res.ok) {
+        setSelected(prev => {
+          const next = new Set(prev);
+          next.delete(filePath);
+          return next;
+        });
+        fetchFiles(currentPath);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Failed to delete file');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error deleting file');
+    }
+  };
+
   const handleConfirm = () => {
     const files = Array.from(selected).map(p => {
       const name = p.split('/').pop() || p;
@@ -132,8 +158,8 @@ export const FilePickerModal: React.FC<FilePickerModalProps> = ({ isOpen, onClos
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-fra-black p-3">
           <div className="flex items-center space-x-2">
-            <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold">FILE PICKER</span>
-            <span className="text-[11px] font-bold">Add Files to Artifacts</span>
+            <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold">FILE EXPLORER</span>
+            <span className="text-[11px] font-bold">Workspace Files</span>
           </div>
           <button className="font-black text-sm px-1.5 hover:bg-neutral-200" onClick={onClose}>✕</button>
         </div>
@@ -184,7 +210,7 @@ export const FilePickerModal: React.FC<FilePickerModalProps> = ({ isOpen, onClos
             entries.map(entry => (
               <div
                 key={entry.path}
-                className={`flex items-center justify-between p-1.5 border transition-colors cursor-pointer ${
+                className={`group flex items-center justify-between p-1.5 border transition-colors cursor-pointer ${
                   selected.has(entry.path)
                     ? 'bg-fra-yellow border-black'
                     : 'border-transparent hover:bg-neutral-100 hover:border-neutral-300'
@@ -212,6 +238,17 @@ export const FilePickerModal: React.FC<FilePickerModalProps> = ({ isOpen, onClos
                   {!entry.is_directory && (
                     <span className="text-[9px] text-neutral-400">{formatSize(entry.size)}</span>
                   )}
+                  {/* Delete file button on hover */}
+                  <button
+                    type="button"
+                    onClick={(e) => void handleDeleteFile(entry.path, e)}
+                    className="p-1 text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-opacity"
+                    title={`Delete ${entry.name}`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                   {entry.is_directory ? (
                     <span className="text-[10px] text-neutral-400 font-bold">→</span>
                   ) : (

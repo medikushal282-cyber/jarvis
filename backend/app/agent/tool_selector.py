@@ -83,9 +83,6 @@ def select_tools_for_objective(
         if any(signal in output_lower for signal in _NEEDS_MORE_TOOLS_SIGNALS):
             force_all = True
 
-    if force_all:
-        return reg.get_tool_definitions(as_openai=True)
-
     # 1. Web & HTTP keywords
     if any(k in obj_lower for k in ["http", "api", "fetch", "request", "download", "url", "web", "scrape", "rest"]):
         selected_names.update(["http_get", "http_post"])
@@ -121,8 +118,18 @@ def select_tools_for_objective(
     if any(k in obj_lower for k in ["sandbox", "isolated", "docker", "container"]):
         selected_names.update(["sandbox_exec"])
 
+    # --- NEW: Filter by User/System Preferences ---
+    from app.api.tools import get_enabled_tool_names
+    enabled_names = get_enabled_tool_names()
+    
+    if force_all:
+        selected_names = enabled_names
+    else:
+        selected_names = selected_names.intersection(enabled_names)
+
     # Retrieve filtered tool schemas
     tools_defs = reg.get_tool_definitions(tool_names=list(selected_names), as_openai=True)
+
 
     # Compact descriptions to save tokens
     for tool_def in tools_defs:

@@ -42,9 +42,11 @@ export interface SessionsHandle {
   loading: boolean;
   error: string | null;
   selectWorkspace: (id: string) => void;
-  createWorkspace: (name: string) => Promise<void>;
+  createWorkspace: (name: string, description?: string) => Promise<void>;
+  renameWorkspace: (id: string, name: string, description?: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
   selectSession: (id: string) => void;
+  renameSession: (id: string, title: string) => Promise<void>;
   /** Start fresh; the next run creates the session. */
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
@@ -146,18 +148,28 @@ export function useSessions(): SessionsHandle {
     setWorkspaceId(id);
   }, []);
 
-  const createWorkspace = useCallback(async (name: string) => {
+  const createWorkspace = useCallback(async (name: string, description = "") => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const { workspace } = await workspacesApi.create(trimmed);
-    await loadWorkspaces();
+    const { workspace } = await workspacesApi.create(trimmed, description);
+    const list = await loadWorkspaces();
     if (workspace?.id) selectWorkspace(workspace.id);
+    else if (list.length > 0) selectWorkspace(list[list.length - 1].id);
   }, [loadWorkspaces, selectWorkspace]);
+
+  const renameWorkspace = useCallback(async (id: string, name: string, description = "") => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await workspacesApi.rename(id, trimmed, description);
+    await loadWorkspaces();
+  }, [loadWorkspaces]);
 
   const deleteWorkspace = useCallback(async (id: string) => {
     await workspacesApi.remove(id);
     const list = await loadWorkspaces();
-    if (id === workspaceId) setWorkspaceId(list[0]?.id ?? "default");
+    if (id === workspaceId) {
+      setWorkspaceId(list[0]?.id ?? "default");
+    }
   }, [loadWorkspaces, workspaceId]);
 
   const selectSession = useCallback((id: string) => setSessionId(id), []);
@@ -168,8 +180,16 @@ export function useSessions(): SessionsHandle {
     setContextSummary("");
   }, []);
 
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    await sessionsApi.rename(id, trimmed);
+    if (workspaceId) await loadSessions(workspaceId);
+    if (id === sessionId) await loadSession(id);
+  }, [workspaceId, sessionId, loadSessions, loadSession]);
+
   const deleteSession = useCallback(async (id: string) => {
-    await sessionsApi.remove(id);
+    await sessionsApi.remove(id, true);
     if (workspaceId) await loadSessions(workspaceId);
     if (id === sessionId) newSession();
   }, [workspaceId, sessionId, loadSessions, newSession]);
@@ -199,8 +219,10 @@ export function useSessions(): SessionsHandle {
     error,
     selectWorkspace,
     createWorkspace,
+    renameWorkspace,
     deleteWorkspace,
     selectSession,
+    renameSession,
     newSession,
     deleteSession,
     adoptSession,

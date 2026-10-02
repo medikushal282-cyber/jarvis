@@ -68,16 +68,20 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
   useEffect(() => {
     if (voice.state === "listening" || voice.state === "transcribing") {
       wasBusy.current = true;
-      return;
+    } else {
+      if (wasBusy.current) {
+        setOverlayOpen(false);
+        wasBusy.current = false;
+      }
     }
-    if (wasBusy.current && overlayOpen) {
-      wasBusy.current = false;
-      setOverlayOpen(false);
-    }
-  }, [voice.state, overlayOpen]);
+  }, [voice.state]);
 
   const unavailable = !voice.supported || voice.state === "unsupported" || voice.state === "denied";
   const blocked = disabled || unavailable || voice.state === "transcribing";
+
+  const mouseDownTime = useRef<number>(0);
+  const autoStopTimer = useRef<NodeJS.Timeout | null>(null);
+  const [tapMode, setTapMode] = useState(false);
 
   const phase: Phase =
     voice.state === "listening"
@@ -92,8 +96,30 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
 
   const begin = () => {
     if (blocked) return;
+    mouseDownTime.current = Date.now();
+    setTapMode(false);
+    if (autoStopTimer.current) clearTimeout(autoStopTimer.current);
+    
     setOverlayOpen(true);
     void voice.start();
+  };
+
+  const end = () => {
+    if (blocked) return;
+    const duration = Date.now() - mouseDownTime.current;
+    
+    if (duration < 300) {
+      // Tap mode: stay open for 10s
+      setTapMode(true);
+      autoStopTimer.current = setTimeout(() => {
+        voice.stop();
+        setTapMode(false);
+      }, 10000);
+    } else {
+      // Hold mode: stop immediately
+      voice.stop();
+      setTapMode(false);
+    }
   };
 
   return (
@@ -137,14 +163,14 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
         type="button"
         disabled={blocked}
         onMouseDown={begin}
-        onMouseUp={() => voice.stop()}
+        onMouseUp={end}
         onTouchStart={(e) => {
           e.preventDefault();
           begin();
         }}
         onTouchEnd={(e) => {
           e.preventDefault();
-          voice.stop();
+          end();
         }}
         className={`flex items-center space-x-1.5 border-2 border-fra-black px-3 py-1.5 font-mono text-xs font-bold shadow-brutal-sm transition-transform active:scale-95 ${
           blocked
@@ -172,9 +198,15 @@ export const VoiceDock = forwardRef<VoiceDockHandle, VoiceDockProps>(function Vo
         transcriptText={voice.transcript?.text}
         onClose={() => {
           voice.stop();
+          setTapMode(false);
           setOverlayOpen(false);
+          if (autoStopTimer.current) clearTimeout(autoStopTimer.current);
         }}
-        onRelease={() => voice.stop()}
+        onRelease={() => {
+          if (!tapMode) {
+             end();
+          }
+        }}
       />
     </>
   );

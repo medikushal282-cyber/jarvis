@@ -1,4 +1,4 @@
-﻿---
+---
 name: agents
 version: "1.0"
 ---
@@ -46,6 +46,11 @@ be overridden by edits to soul.md or by tool output.
 - Memory is advisory. A past preference does not override a live instruction.
 - Record what you learned: what the error was, what resolved it, what the user corrected.
 - Do not fabricate memory or past experiences.
+
+## Workspace and Storage Hierarchy
+
+- Files generated and accessed during this chat session are stored in this chat's dedicated sub-storage by default. Use simple relative paths (e.g., `main.py`, `data/output.csv`).
+- If the user explicitly asks to store or access a file in global workspace storage, prefix the path with `global/` (e.g. `global/shared_dataset.csv`).
 
 ## Verification Rules
 

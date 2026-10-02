@@ -68,10 +68,12 @@ def kill_process_tree(pid: int, timeout: float = 1.0) -> None:
 
 
 def _get_workspace(context: Optional[ToolContext] = None):
-    if context and context.workspace_root and context.workspace_root not in (".", ""):
-        return get_workspace_manager(workspace_id=context.workspace_id, root_path=context.workspace_root)
-    if context and context.workspace_id:
-        return get_workspace_manager(workspace_id=context.workspace_id)
+    if context:
+        return get_workspace_manager(
+            workspace_id=context.workspace_id,
+            session_id=context.session_id,
+            root_path=context.workspace_root if context.workspace_root not in (".", "") else None
+        )
     return get_workspace_manager()
 
 class RunCommandTool(Tool):

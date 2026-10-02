@@ -32,8 +32,8 @@ def project_root() -> Path:
 
 
 def sandbox_root() -> Path:
-    override = os.environ.get("JARVIS_SANDBOX_ROOT")
-    root = Path(override).resolve() if override else project_root() / "sandbox"
+    override = os.environ.get("JARVIS_WORKSPACE_ROOT") or os.environ.get("JARVIS_SANDBOX_ROOT")
+    root = Path(override).resolve() if override else project_root() / "workspace"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -89,9 +89,9 @@ ARTIFACT_MAX_BYTES = _int("JARVIS_ARTIFACT_MAX_BYTES", 10 * 1024 * 1024)
 
 STT_ENABLED = _flag("JARVIS_STT_ENABLED", True)
 TTS_ENABLED = _flag("JARVIS_TTS_ENABLED", True)
-#: "browser" keeps synthesis client-side (zero cost, zero latency);
-#: "groq" routes through the hosted TTS backend.
-TTS_BACKEND = os.environ.get("JARVIS_TTS_BACKEND", "browser").strip().lower()
+#: "edge" -> High-quality neural British Butler / Jarvis voices (free, zero API key needed);
+#: "groq" -> hosted Orpheus TTS; "browser" -> client-side Web Speech.
+TTS_BACKEND = os.environ.get("JARVIS_TTS_BACKEND", "edge").strip().lower()
 # Model ids checked against Groq's live model list on 2026-09-29.
 STT_MODEL = os.environ.get("JARVIS_STT_MODEL", "whisper-large-v3-turbo")
 STT_FALLBACK_MODELS = [
@@ -103,8 +103,8 @@ STT_FALLBACK_MODELS = [
 # to accept its terms once in the Groq console before it will answer.
 # Documented English voices: troy, hannah, austin. Output is WAV.
 TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "canopylabs/orpheus-v1-english")
-TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "troy")
-TTS_FORMAT = os.environ.get("JARVIS_TTS_FORMAT", "wav")
+TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "en-GB-RyanNeural")
+TTS_FORMAT = os.environ.get("JARVIS_TTS_FORMAT", "mp3")
 MAX_UTTERANCE_S = _int("JARVIS_MAX_UTTERANCE_S", 60)
 MAX_AUDIO_BYTES = _int("JARVIS_MAX_AUDIO_BYTES", 25 * 1024 * 1024)
 SPEAKABLE_MAX_WORDS = _int("JARVIS_SPEAKABLE_MAX_WORDS", 40)

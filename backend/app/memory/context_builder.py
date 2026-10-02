@@ -112,4 +112,5 @@ class ContextBuilder:
         except Exception as e:
             logger.warning(f"Failed to retrieve experiences: {e}")
 
+        context_payload["_tokens_est"] = current_chars // 4
         return context_payload

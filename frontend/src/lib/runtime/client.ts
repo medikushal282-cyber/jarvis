@@ -73,6 +73,11 @@ export const workspaces = {
       method: "POST",
       body: JSON.stringify({ name, description }),
     }),
+  rename: (id: string, name: string, description = "") =>
+    request<{ success: boolean; workspace: any }>(`/api/workspaces/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, description }),
+    }),
   remove: (id: string) =>
     request<{ deleted: string }>(`/api/workspaces/${encodeURIComponent(id)}`, {
       method: "DELETE",
