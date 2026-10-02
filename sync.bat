@@ -1,7 +1,7 @@
 @echo off
 title Jarvis - Git Auto-Sync
 echo ========================================================
-echo          Syncing Jarvis Repository with Git
+echo          Syncing Jarvis Repository with Git (main)
 echo ========================================================
 echo.
 
@@ -23,8 +23,9 @@ if "%~1"=="" (
 )
 
 echo.
-echo [4/4] Pushing to remote repository...
-git push -u origin HEAD
+echo [4/4] Pushing to remote main branch...
+git push origin main
+git push jarvis main
 
 echo.
 echo ========================================================
